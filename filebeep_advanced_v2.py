@@ -413,13 +413,25 @@ class ModernMainWindow(QMainWindow):
         self.log_message("🚀 Sistema FileBeep Advanced inicializado com sucesso!")
 
     def setup_stylesheet(self):
-        """Configura o estilo visual da aplicação"""
         self.setStyleSheet(f"""
-            QMainWindow {{
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 {COLORS['dark']}, stop:1 {COLORS['darker']});
+            /* === REGRA GERAL PARA TEXTO === */
+            QWidget {{
                 color: {COLORS['light']};
+                font-family: "Segoe UI", sans-serif;
             }}
 
+            /* === JANELA PRINCIPAL === */
+            QMainWindow {{
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 {COLORS['dark']}, stop:1 {COLORS['darker']});
+            }}
+
+            /* === LABELS (TEXTOS FIXOS) === */
+            QLabel {{
+                color: {COLORS['light']};
+                background: transparent; /* Importante para não cobrir o gradiente */
+            }}
+
+            /* === ABAS (TABS) === */
             QTabWidget::pane {{
                 border: 1px solid {COLORS['primary']};
                 background: {COLORS['darker']};
@@ -430,29 +442,34 @@ class ModernMainWindow(QMainWindow):
                 color: {COLORS['light']};
                 padding: 8px 16px;
                 margin-right: 2px;
-                border-radius: 4px;
+                border-top-left-radius: 4px;
+                border-top-right-radius: 4px;
             }}
 
             QTabBar::tab:selected {{
                 background: {COLORS['primary']};
                 color: white;
+                font-weight: bold;
             }}
 
+            /* === GRUPOS (CAIXAS COM BORDAS) === */
             QGroupBox {{
                 font-weight: bold;
-                color: {COLORS['accent']};
+                color: {COLORS['accent']}; /* Cor do título do grupo */
                 border: 1px solid {COLORS['primary']};
                 border-radius: 5px;
-                margin-top: 10px;
-                padding-top: 10px;
+                margin-top: 15px; /* Espaço para o título */
+                padding-top: 15px;
             }}
 
             QGroupBox::title {{
                 subcontrol-origin: margin;
                 left: 10px;
-                padding: 0 5px 0 5px;
+                padding: 0 5px;
+                background-color: {COLORS['darker']}; /* Fundo atrás do título */
             }}
 
+            /* === BOTÕES === */
             QPushButton {{
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {COLORS['primary']}, stop:1 {COLORS['secondary']});
                 color: white;
@@ -464,36 +481,88 @@ class ModernMainWindow(QMainWindow):
 
             QPushButton:hover {{
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {COLORS['secondary']}, stop:1 {COLORS['primary']});
+                border: 1px solid {COLORS['accent']};
             }}
 
             QPushButton:pressed {{
                 background: {COLORS['accent']};
             }}
-
-            QComboBox, QSpinBox, QCheckBox {{
+            
+            QPushButton:disabled {{
                 background: {COLORS['dark']};
-                color: {COLORS['light']};
+                color: #888888;
+                border: 1px solid #555555;
+            }}
+
+            /* === ENTRADAS DE DADOS (COMBO, SPIN, CHECKBOX) === */
+            QComboBox, QSpinBox {{
+                background-color: {COLORS['darker']}; /* Fundo escuro */
+                color: {COLORS['light']}; /* Texto claro */
                 border: 1px solid {COLORS['primary']};
                 border-radius: 3px;
                 padding: 5px;
+                selection-background-color: {COLORS['primary']};
+            }}
+            
+            QComboBox QAbstractItemView {{
+                background-color: {COLORS['darker']};
+                color: {COLORS['light']};
+                selection-background-color: {COLORS['primary']};
             }}
 
+            QCheckBox {{
+                color: {COLORS['light']};
+                spacing: 5px;
+            }}
+            
+            QCheckBox::indicator {{
+                width: 15px;
+                height: 15px;
+                border: 1px solid {COLORS['primary']};
+                border-radius: 3px;
+                background: {COLORS['darker']};
+            }}
+            
+            QCheckBox::indicator:checked {{
+                background: {COLORS['success']};
+                border: 1px solid {COLORS['success']};
+            }}
+
+            /* === BARRA DE PROGRESSO === */
             QProgressBar {{
                 border: 1px solid {COLORS['primary']};
                 border-radius: 3px;
                 text-align: center;
-                color: {COLORS['light']};
+                color: white;
+                background-color: {COLORS['darker']};
             }}
 
             QProgressBar::chunk {{
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 {COLORS['success']}, stop:1 {COLORS['accent']});
             }}
 
+            /* === CAIXAS DE TEXTO E LISTAS === */
             QTextEdit, QListWidget {{
-                background: {COLORS['dark']};
+                background-color: {COLORS['darker']};
                 color: {COLORS['light']};
                 border: 1px solid {COLORS['primary']};
                 border-radius: 3px;
+            }}
+            
+            /* Barras de Rolagem (Opcional, para ficar bonito) */
+            QScrollBar:vertical {{
+                border: none;
+                background: {COLORS['dark']};
+                width: 10px;
+                margin: 0px;
+            }}
+            QScrollBar::handle:vertical {{
+                background: {COLORS['primary']};
+                min-height: 20px;
+                border-radius: 5px;
+            }}
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
+                height: 0px;
             }}
         """)
 
