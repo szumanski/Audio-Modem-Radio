@@ -42,12 +42,18 @@ except ImportError:
 # ===============================================
 def setup_executable_paths():
     if getattr(sys, 'frozen', False):
+        # Se estiver rodando como .exe (PyInstaller)
         base_path = sys._MEIPASS
     else:
+        # Se estiver rodando no PyCharm/Terminal
         base_path = os.path.dirname(os.path.abspath(__file__))
 
     sys.path.insert(0, base_path)
-    os.environ['QT_QPA_PLATFORM_PLUGIN_PATH'] = os.path.join(base_path, 'PyQt5', 'Qt5', 'plugins')
+
+    # IMPORTANTE: Comente ou remova a linha abaixo.
+    # O PyInstaller configura o Qt automaticamente. Forçar isso causa erro no .exe.
+    # os.environ['QT_QPA_PLATFORM_PLUGIN_PATH'] = os.path.join(base_path, 'PyQt5', 'Qt5', 'plugins')
+
     return base_path
 
 
