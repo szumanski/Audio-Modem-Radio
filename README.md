@@ -1,11 +1,9 @@
 Este software so funciona em computadores por enquanto, futuramente vou tentar portar ele para Android
 
 Para gerar o executavel voce deve primeiro instalar todas as bibliotecas nescessarias do projeto, depois execute o comando no terminal 
+Recomendo Usar o Pycharm
 
-pyinstaller --onefile --windowed --name "FileBeepAdvanced" --add-data "encoder.py;." --add-data "decoder.py;." --add-data "modem.py;." --add-data "utils/compression.py;." --add-data "hellschreiber.py;." --add-data "fec.py;." --add-data "config.py;." 
---hidden-import=pygame --hidden-import=PyQt5 --hidden-import=PyQt5.QtCore --hidden-import=PyQt5.QtWidgets --hidden-import=PyQt5.QtGui --hidden-import=sounddevice --hidden-import=soundfile --hidden-import=numpy --hidden-import=scipy --hidden-import=scipy.signal 
---hidden-import=scipy.fft --hidden-import=sklearn --hidden-import=sklearn.ensemble --hidden-import=sklearn.tree --hidden-import=sklearn.base --hidden-import=psutil --hidden-import=pyqtgraph --hidden-import=threading --hidden-import=struct --hidden-import=binascii 
---hidden-import=hashlib --hidden-import=math --hidden-import=time --hidden-import=os --hidden-import=sys --clean filebeep_advanced_v2.py
+pyinstaller --noconfirm --onefile --windowed --clean --name "FileBeepAdvanced" --hidden-import=sklearn.utils._cython_blas --hidden-import=sklearn.neighbors.typedefs --hidden-import=sklearn.neighbors.quad_tree --hidden-import=sklearn.tree --hidden-import=sklearn.ensemble --collect-all sklearn --collect-all scipy filebeep_advanced_v2.py
 
 Manual Completo do FileBeep Advanced v2
 📋 Índice
