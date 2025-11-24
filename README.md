@@ -1,9 +1,10 @@
 Este software so funciona em computadores por enquanto, futuramente vou tentar portar ele para Android
 
 Para gerar o executavel voce deve primeiro instalar todas as bibliotecas nescessarias do projeto, depois execute o comando no terminal 
+
 Recomendo Usar o Pycharm
 
-pyinstaller --noconfirm --onefile --windowed --clean --name "FileBeepAdvanced" --hidden-import=sklearn.utils._cython_blas --hidden-import=sklearn.neighbors.typedefs --hidden-import=sklearn.neighbors.quad_tree --hidden-import=sklearn.tree --hidden-import=sklearn.ensemble --collect-all sklearn --collect-all scipy filebeep_advanced_v2.py
+pyinstaller --noconfirm --onefile --windowed --clean --name "FileBeepAdvanced" --hidden-import=serial --hidden-import=sklearn.utils._cython_blas --hidden-import=sklearn.neighbors.typedefs --hidden-import=sklearn.neighbors.quad_tree --hidden-import=sklearn.tree --hidden-import=sklearn.ensemble --collect-all sklearn --collect-all scipy filebeep_advanced_v2.py
 
 Manual Completo do FileBeep Advanced v2
 📋 Índice
