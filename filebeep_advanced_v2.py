@@ -1,4 +1,4 @@
-# main.py - CLASSE PRINCIPAL COMPLETA E CORRIGIDA
+# main.py - CLASSE PRINCIPAL COM INTERFACE MELHORADA
 import os
 import sys
 import tempfile
@@ -12,6 +12,12 @@ import sounddevice as sd
 import numpy as np
 import soundfile as sf
 from PyQt5.QtCore import QTimer
+from PyQt5.QtGui import QFont, QPalette, QColor, QLinearGradient, QPainter, QPen
+from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
+                             QHBoxLayout, QTabWidget, QGroupBox, QLabel,
+                             QPushButton, QComboBox, QSpinBox, QCheckBox,
+                             QProgressBar, QTextEdit, QListWidget, QListWidgetItem,
+                             QFileDialog, QMessageBox, QSplitter, QFrame)
 
 from encoder import encode_file, cancel_encoding, get_encoding_stats
 from decoder import decode_wav_file, decode_from_buffer, get_assembly_status, get_reception_stats
@@ -50,10 +56,206 @@ BASE_PATH = setup_executable_paths()
 CACHE_DIR = "cache"
 os.makedirs(CACHE_DIR, exist_ok=True)
 
+# ===============================================
+# CONSTANTES E CONFIGURAÇÕES DE UI
+# ===============================================
 MODES = ["FSK1200", "FSK9600", "BPSK", "QPSK", "SSTV", "8PSK", "FSK19200",
          "OFDM4", "OFDM8", "APSK16", "DSSS", "MSK", "HELLSCHREIBER"]
 
+DIGITAL_MODES = [
+    "FSK1200", "FSK9600", "BPSK", "QPSK", "8PSK", "FSK19200", "OFDM4", "OFDM8", "APSK16", "DSSS", "MSK",
+    "FT8", "FT4", "JT65", "JT9", "MSK144", "WSPR", "JS8", "PSK31", "PSK63", "BPSK31", "RTTY", "FSK", "MFSK8", "MFSK16",
+    "AFSK1200", "AFSK2400", "AX25", "PACTOR", "ARDOP", "VARA", "WINLINK", "DMR", "DSTAR", "NXDN", "P25", "YSF", "TETRA",
+    "OLIVIA", "THOR", "MT63", "FSQ", "ALE", "CLOVER", "CHIRP", "COFDM", "LRPT", "DVB_S2", "LORA"
+]
 
+ANALOG_MODES = ["SSTV", "HELLSCHREIBER", "FELD_HELL", "SLOW_HELL"]
+
+COLORS = {
+    'primary': '#2E86AB',
+    'secondary': '#A23B72',
+    'accent': '#F18F01',
+    'dark': '#1A1A2E',
+    'darker': '#16213E',
+    'light': '#F8F9FA',
+    'success': '#28A745',
+    'warning': '#FFC107',
+    'danger': '#DC3545',
+    'info': '#17A2B8'
+}
+
+
+# ===============================================
+# COMPONENTES DE UI PERSONALIZADOS
+# ===============================================
+class HeaderWidget(QWidget):
+    def __init__(self, title="FileBeep Advanced v2", subtitle="Sistema Avançado de Transmissão de Dados por Áudio"):
+        super().__init__()
+        self.title = title
+        self.subtitle = subtitle
+        self.init_ui()
+
+    def init_ui(self):
+        layout = QVBoxLayout()
+        layout.setContentsMargins(0, 10, 0, 10)
+
+        title_label = QLabel(self.title)
+        title_label.setAlignment(QtCore.Qt.AlignCenter)
+        title_font = QFont()
+        title_font.setPointSize(18)
+        title_font.setBold(True)
+        title_label.setFont(title_font)
+        title_label.setStyleSheet(f"color: {COLORS['primary']}; padding: 5px;")
+
+        subtitle_label = QLabel(self.subtitle)
+        subtitle_label.setAlignment(QtCore.Qt.AlignCenter)
+        subtitle_font = QFont()
+        subtitle_font.setPointSize(10)
+        subtitle_label.setFont(subtitle_font)
+        subtitle_label.setStyleSheet(f"color: {COLORS['light']}; padding: 2px;")
+
+        layout.addWidget(title_label)
+        layout.addWidget(subtitle_label)
+
+        self.setLayout(layout)
+        self.setStyleSheet(
+            f"background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 {COLORS['dark']}, stop:1 {COLORS['darker']}); border-radius: 5px;")
+
+
+class ModeDiagramWidget(QWidget):
+    def __init__(self, mode_name="QPSK"):
+        super().__init__()
+        self.mode_name = mode_name
+        self.setMinimumHeight(120)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        width = self.width()
+        height = self.height()
+
+        # Fundo
+        painter.fillRect(0, 0, width, height, QColor(COLORS['darker']))
+
+        # Desenho baseado no modo
+        if "FSK" in self.mode_name:
+            self.draw_fsk_diagram(painter, width, height)
+        elif "PSK" in self.mode_name:
+            self.draw_psk_diagram(painter, width, height)
+        elif "QPSK" in self.mode_name:
+            self.draw_qpsk_diagram(painter, width, height)
+        elif "OFDM" in self.mode_name:
+            self.draw_ofdm_diagram(painter, width, height)
+        else:
+            self.draw_generic_diagram(painter, width, height)
+
+        # Nome do modo
+        painter.setPen(QColor(COLORS['light']))
+        painter.drawText(10, height - 10, self.mode_name)
+
+    def draw_fsk_diagram(self, painter, width, height):
+        center_y = height // 2
+        painter.setPen(QPen(QColor(COLORS['accent']), 2))
+
+        for i in range(0, width, 10):
+            freq = 1 if (i // 20) % 2 == 0 else 2
+            y_offset = 20 * (freq - 1)
+            painter.drawLine(i, center_y - y_offset, i + 10, center_y - y_offset)
+
+    def draw_psk_diagram(self, painter, width, height):
+        center_x, center_y = width // 2, height // 2
+        radius = min(width, height) // 3
+
+        painter.setPen(QPen(QColor(COLORS['primary']), 2))
+        painter.drawEllipse(center_x - radius, center_y - radius, radius * 2, radius * 2)
+
+        # Pontos da constelação
+        painter.setBrush(QColor(COLORS['accent']))
+        for angle in [0, 90, 180, 270]:
+            rad = angle * 3.14159 / 180
+            x = center_x + radius * np.cos(rad)
+            y = center_y + radius * np.sin(rad)
+            painter.drawEllipse(int(x - 3), int(y - 3), 6, 6)
+
+    def draw_qpsk_diagram(self, painter, width, height):
+        center_x, center_y = width // 2, height // 2
+        radius = min(width, height) // 3
+
+        painter.setPen(QPen(QColor(COLORS['secondary']), 2))
+        painter.drawEllipse(center_x - radius, center_y - radius, radius * 2, radius * 2)
+
+        # Pontos QPSK
+        painter.setBrush(QColor(COLORS['success']))
+        points = [
+            (center_x + radius * 0.7, center_y + radius * 0.7),
+            (center_x - radius * 0.7, center_y + radius * 0.7),
+            (center_x + radius * 0.7, center_y - radius * 0.7),
+            (center_x - radius * 0.7, center_y - radius * 0.7)
+        ]
+        for x, y in points:
+            painter.drawEllipse(int(x - 3), int(y - 3), 6, 6)
+
+    def draw_ofdm_diagram(self, painter, width, height):
+        center_y = height // 2
+        subcarriers = 8
+
+        painter.setPen(QPen(QColor(COLORS['info']), 1))
+        for i in range(subcarriers):
+            freq = i + 1
+            y = center_y - (freq - subcarriers / 2) * 8
+
+            # Onda senoidal para cada subportadora
+            for x in range(0, width, 2):
+                y_pos = y + 10 * np.sin(2 * np.pi * freq * x / width)
+                painter.drawPoint(x, int(y_pos))
+
+    def draw_generic_diagram(self, painter, width, height):
+        center_y = height // 2
+
+        painter.setPen(QPen(QColor(COLORS['warning']), 2))
+        for x in range(0, width, 3):
+            y = center_y + 20 * np.sin(2 * np.pi * x / width)
+            painter.drawPoint(x, int(y))
+
+
+class StatusWidget(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.init_ui()
+
+    def init_ui(self):
+        layout = QHBoxLayout()
+        layout.setContentsMargins(10, 5, 10, 5)
+
+        # Ícones de status
+        self.cpu_label = QLabel("CPU: --%")
+        self.memory_label = QLabel("RAM: --%")
+        self.disk_label = QLabel("DISK: --MB")
+
+        for label in [self.cpu_label, self.memory_label, self.disk_label]:
+            label.setStyleSheet(
+                f"background: {COLORS['dark']}; color: {COLORS['light']}; padding: 3px 8px; border-radius: 3px;")
+            layout.addWidget(label)
+
+        layout.addStretch()
+
+        self.status_label = QLabel("Sistema Pronto")
+        self.status_label.setStyleSheet(f"color: {COLORS['success']}; font-weight: bold;")
+        layout.addWidget(self.status_label)
+
+        self.setLayout(layout)
+        self.setStyleSheet(f"background: {COLORS['darker']}; border-top: 1px solid {COLORS['primary']};")
+
+    def update_metrics(self, metrics):
+        self.cpu_label.setText(f"CPU: {metrics.get('cpu', 0):.1f}%")
+        self.memory_label.setText(f"RAM: {metrics.get('memory', 0):.1f}%")
+        self.disk_label.setText(f"DISK: {metrics.get('disk_io', 0):.1f}MB")
+
+
+# ===============================================
+# WORKERS E THREADS (mantidos da versão anterior)
+# ===============================================
 class WorkerRecord(QtCore.QThread):
     finished = QtCore.pyqtSignal(list)
     volume = QtCore.pyqtSignal(float)
@@ -67,6 +269,7 @@ class WorkerRecord(QtCore.QThread):
         self.fs = 48000
 
     def run(self):
+        # Implementação mantida da versão anterior
         fs = self.fs
         buf = []
 
@@ -172,6 +375,874 @@ class PerformanceMonitor(QtCore.QThread):
             return {'cpu': 0, 'memory': 0, 'disk_io': 0}
 
 
+# ===============================================
+# JANELA PRINCIPAL MELHORADA
+# ===============================================
+class ModernMainWindow(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("FileBeep Advanced v2 - Sistema de Transmissão por Áudio")
+        self.resize(1400, 900)
+        self.setWindowIcon(self.create_icon())
+
+        # Configurar estilo da aplicação
+        self.setup_stylesheet()
+
+        # Inicializar componentes
+        self.audio_player = AudioPlayer()
+        self.played_files = set()
+        self.playing_files = set()
+
+        self.create_ui()
+        self.setup_connections()
+
+        # Inicializar threads e timers
+        self.record_thread = None
+        self.encode_thread = None
+        self.encode_worker = None
+
+        self.setup_timers()
+
+        self.log_manager = LogManager()
+        self.log_message("🚀 Sistema FileBeep Advanced inicializado com sucesso!")
+
+    def setup_stylesheet(self):
+        """Configura o estilo visual da aplicação"""
+        self.setStyleSheet(f"""
+            QMainWindow {{
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 {COLORS['dark']}, stop:1 {COLORS['darker']});
+                color: {COLORS['light']};
+            }}
+
+            QTabWidget::pane {{
+                border: 1px solid {COLORS['primary']};
+                background: {COLORS['darker']};
+            }}
+
+            QTabBar::tab {{
+                background: {COLORS['dark']};
+                color: {COLORS['light']};
+                padding: 8px 16px;
+                margin-right: 2px;
+                border-radius: 4px;
+            }}
+
+            QTabBar::tab:selected {{
+                background: {COLORS['primary']};
+                color: white;
+            }}
+
+            QGroupBox {{
+                font-weight: bold;
+                color: {COLORS['accent']};
+                border: 1px solid {COLORS['primary']};
+                border-radius: 5px;
+                margin-top: 10px;
+                padding-top: 10px;
+            }}
+
+            QGroupBox::title {{
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px 0 5px;
+            }}
+
+            QPushButton {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {COLORS['primary']}, stop:1 {COLORS['secondary']});
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 4px;
+                font-weight: bold;
+            }}
+
+            QPushButton:hover {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {COLORS['secondary']}, stop:1 {COLORS['primary']});
+            }}
+
+            QPushButton:pressed {{
+                background: {COLORS['accent']};
+            }}
+
+            QComboBox, QSpinBox, QCheckBox {{
+                background: {COLORS['dark']};
+                color: {COLORS['light']};
+                border: 1px solid {COLORS['primary']};
+                border-radius: 3px;
+                padding: 5px;
+            }}
+
+            QProgressBar {{
+                border: 1px solid {COLORS['primary']};
+                border-radius: 3px;
+                text-align: center;
+                color: {COLORS['light']};
+            }}
+
+            QProgressBar::chunk {{
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 {COLORS['success']}, stop:1 {COLORS['accent']});
+            }}
+
+            QTextEdit, QListWidget {{
+                background: {COLORS['dark']};
+                color: {COLORS['light']};
+                border: 1px solid {COLORS['primary']};
+                border-radius: 3px;
+            }}
+        """)
+
+    def create_icon(self):
+        """Cria um ícone simples para a aplicação"""
+        pixmap = QtGui.QPixmap(32, 32)
+        pixmap.fill(QColor(COLORS['primary']))
+        painter = QPainter(pixmap)
+        painter.setPen(QColor(COLORS['light']))
+        painter.drawText(8, 20, "FB")
+        painter.end()
+        return QtGui.QIcon(pixmap)
+
+    def create_ui(self):
+        """Cria a interface do usuário"""
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+
+        main_layout = QVBoxLayout(central_widget)
+        main_layout.setSpacing(5)
+        main_layout.setContentsMargins(10, 10, 10, 10)
+
+        # Cabeçalho
+        header = HeaderWidget()
+        main_layout.addWidget(header)
+
+        # Área principal com abas
+        self.tabs = QTabWidget()
+        main_layout.addWidget(self.tabs)
+
+        # Criar abas
+        self.create_encode_tab()
+        self.create_decode_tab()
+        self.create_player_tab()
+        self.create_analysis_tab()
+
+        # Log
+        self.create_log_area(main_layout)
+
+        # Status bar
+        self.status_widget = StatusWidget()
+        main_layout.addWidget(self.status_widget)
+
+    def create_encode_tab(self):
+        """Cria a aba de codificação"""
+        encode_tab = QWidget()
+        layout = QHBoxLayout(encode_tab)
+
+        # Painel esquerdo - Configurações
+        left_panel = QWidget()
+        left_layout = QVBoxLayout(left_panel)
+
+        # Grupo de seleção de arquivo
+        file_group = QGroupBox("📁 Seleção de Arquivo")
+        file_layout = QVBoxLayout(file_group)
+
+        self.file_path_label = QLabel("Nenhum arquivo selecionado")
+        self.file_path_label.setStyleSheet(f"color: {COLORS['warning']}; font-style: italic;")
+        file_layout.addWidget(self.file_path_label)
+
+        file_buttons_layout = QHBoxLayout()
+        self.select_file_btn = QPushButton("📂 Selecionar Arquivo")
+        self.select_file_btn.clicked.connect(self.select_file)
+        file_buttons_layout.addWidget(self.select_file_btn)
+
+        file_layout.addLayout(file_buttons_layout)
+        left_layout.addWidget(file_group)
+
+        # Grupo de configurações
+        config_group = QGroupBox("⚙️ Configurações de Transmissão")
+        config_layout = QVBoxLayout(config_group)
+
+        # Modo de modulação
+        mode_layout = QHBoxLayout()
+        mode_layout.addWidget(QLabel("Modo:"))
+        self.mode_combo = QComboBox()
+        self.mode_combo.addItems(MODES)
+        self.mode_combo.setCurrentText("QPSK")
+        self.mode_combo.currentTextChanged.connect(self.update_mode_diagram)
+        mode_layout.addWidget(self.mode_combo)
+        config_layout.addLayout(mode_layout)
+
+        # Taxa de símbolo
+        rate_layout = QHBoxLayout()
+        rate_layout.addWidget(QLabel("Taxa de Símbolo:"))
+        self.symbol_rate_spin = QSpinBox()
+        self.symbol_rate_spin.setRange(100, 19200)
+        self.symbol_rate_spin.setValue(9600)
+        rate_layout.addWidget(self.symbol_rate_spin)
+        config_layout.addLayout(rate_layout)
+
+        # Opções
+        self.compress_check = QCheckBox("📦 Usar Compressão")
+        self.compress_check.setChecked(True)
+        config_layout.addWidget(self.compress_check)
+
+        duration_layout = QHBoxLayout()
+        duration_layout.addWidget(QLabel("Duração por Parte (min):"))
+        self.duration_spin = QSpinBox()
+        self.duration_spin.setRange(1, 60)
+        self.duration_spin.setValue(1)
+        duration_layout.addWidget(self.duration_spin)
+        config_layout.addLayout(duration_layout)
+
+        left_layout.addWidget(config_group)
+
+        # Botões de ação
+        action_layout = QVBoxLayout()
+        self.encode_button = QPushButton("🚀 Iniciar Codificação")
+        self.encode_button.clicked.connect(self.encode_file_button_clicked)
+        action_layout.addWidget(self.encode_button)
+
+        self.encode_progress = QProgressBar()
+        action_layout.addWidget(self.encode_progress)
+
+        self.cancel_encode_button = QPushButton("❌ Cancelar Codificação")
+        self.cancel_encode_button.clicked.connect(self.cancel_encoding)
+        self.cancel_encode_button.setEnabled(False)
+        action_layout.addWidget(self.cancel_encode_button)
+
+        left_layout.addLayout(action_layout)
+        left_layout.addStretch()
+
+        # Painel direito - Visualização
+        right_panel = QWidget()
+        right_layout = QVBoxLayout(right_panel)
+
+        # Diagrama do modo
+        diagram_group = QGroupBox("📊 Diagrama do Modo")
+        diagram_layout = QVBoxLayout(diagram_group)
+        self.mode_diagram = ModeDiagramWidget("QPSK")
+        diagram_layout.addWidget(self.mode_diagram)
+        right_layout.addWidget(diagram_group)
+
+        # Estatísticas
+        stats_group = QGroupBox("📈 Estatísticas")
+        stats_layout = QVBoxLayout(stats_group)
+        self.stats_text = QTextEdit()
+        self.stats_text.setMaximumHeight(150)
+        self.stats_text.setPlainText("Selecione um arquivo para ver as estatísticas...")
+        stats_layout.addWidget(self.stats_text)
+        right_layout.addWidget(stats_group)
+
+        right_layout.addStretch()
+
+        # Adicionar painéis ao layout principal
+        layout.addWidget(left_panel, 1)
+        layout.addWidget(right_panel, 1)
+
+        self.tabs.addTab(encode_tab, "🔧 Codificação")
+
+    def create_decode_tab(self):
+        """Cria a aba de decodificação"""
+        decode_tab = QWidget()
+        layout = QVBoxLayout(decode_tab)
+
+        # Configurações de decodificação
+        config_group = QGroupBox("🎛️ Configurações de Recepção")
+        config_layout = QHBoxLayout(config_group)
+
+        config_layout.addWidget(QLabel("Modo:"))
+        self.decode_mode_combo = QComboBox()
+        self.decode_mode_combo.addItems(MODES)
+        self.decode_mode_combo.setCurrentText("QPSK")
+        config_layout.addWidget(self.decode_mode_combo)
+
+        config_layout.addWidget(QLabel("Taxa de Símbolo:"))
+        self.decode_sr_spin = QSpinBox()
+        self.decode_sr_spin.setRange(100, 19200)
+        self.decode_sr_spin.setValue(9600)
+        config_layout.addWidget(self.decode_sr_spin)
+
+        config_layout.addStretch()
+        layout.addWidget(config_group)
+
+        # Controles de gravação
+        record_group = QGroupBox("🎤 Captura de Áudio")
+        record_layout = QVBoxLayout(record_group)
+
+        # Medidor de volume
+        volume_layout = QHBoxLayout()
+        volume_layout.addWidget(QLabel("Nível de Áudio:"))
+        self.volume_meter = QProgressBar()
+        self.volume_meter.setRange(0, 100)
+        volume_layout.addWidget(self.volume_meter)
+        record_layout.addLayout(volume_layout)
+
+        # Botões de gravação
+        record_buttons_layout = QHBoxLayout()
+        self.record_button = QPushButton("🔴 Iniciar Gravação (30s)")
+        self.record_button.clicked.connect(self.start_record)
+        record_buttons_layout.addWidget(self.record_button)
+
+        self.decode_file_btn = QPushButton("📁 Decodificar Arquivo WAV")
+        self.decode_file_btn.clicked.connect(self.decode_wav_file)
+        record_buttons_layout.addWidget(self.decode_file_btn)
+
+        record_layout.addLayout(record_buttons_layout)
+        layout.addWidget(record_group)
+
+        # Status de montagem
+        splitter = QSplitter(QtCore.Qt.Vertical)
+
+        # Status de montagem
+        assembly_group = QGroupBox("📦 Status de Montagem de Arquivos")
+        assembly_layout = QVBoxLayout(assembly_group)
+        self.assembly_status = QTextEdit()
+        self.assembly_status.setMaximumHeight(150)
+        assembly_layout.addWidget(self.assembly_status)
+        splitter.addWidget(assembly_group)
+
+        # Estatísticas de recepção
+        stats_group = QGroupBox("📊 Estatísticas de Recepção")
+        stats_layout = QVBoxLayout(stats_group)
+        self.reception_stats = QTextEdit()
+        self.reception_stats.setMaximumHeight(150)
+        stats_layout.addWidget(self.reception_stats)
+        splitter.addWidget(stats_group)
+
+        layout.addWidget(splitter)
+
+        self.tabs.addTab(decode_tab, "🔍 Decodificação")
+
+    def create_player_tab(self):
+        """Cria a aba do player"""
+        player_tab = QWidget()
+        layout = QVBoxLayout(player_tab)
+
+        # Playlist
+        playlist_group = QGroupBox("🎵 Playlist de Transmissão")
+        playlist_layout = QVBoxLayout(playlist_group)
+        self.playlist_widget = QListWidget()
+        self.playlist_widget.itemDoubleClicked.connect(self.on_playlist_item_double_click)
+        playlist_layout.addWidget(self.playlist_widget)
+        layout.addWidget(playlist_group)
+
+        # Controles do player
+        controls_group = QGroupBox("🎛️ Controles de Reprodução")
+        controls_layout = QVBoxLayout(controls_group)
+
+        # Informações do arquivo atual
+        self.now_playing_label = QLabel("Nenhum arquivo em reprodução")
+        self.now_playing_label.setAlignment(QtCore.Qt.AlignCenter)
+        self.now_playing_label.setStyleSheet(f"color: {COLORS['accent']}; font-weight: bold; padding: 5px;")
+        controls_layout.addWidget(self.now_playing_label)
+
+        # Barra de progresso
+        self.playback_progress = QProgressBar()
+        controls_layout.addWidget(self.playback_progress)
+
+        # Botões de controle
+        player_buttons_layout = QHBoxLayout()
+
+        self.play_selected_btn = QPushButton("▶️ Reproduzir")
+        self.play_selected_btn.clicked.connect(self.on_play_selected)
+        player_buttons_layout.addWidget(self.play_selected_btn)
+
+        self.pause_button = QPushButton("⏸️ Pausar")
+        self.pause_button.clicked.connect(self.on_pause)
+        player_buttons_layout.addWidget(self.pause_button)
+
+        self.stop_button = QPushButton("⏹️ Parar")
+        self.stop_button.clicked.connect(self.on_stop)
+        player_buttons_layout.addWidget(self.stop_button)
+
+        self.clear_playlist_btn = QPushButton("🗑️ Limpar Playlist")
+        self.clear_playlist_btn.clicked.connect(self.on_clear_playlist)
+        player_buttons_layout.addWidget(self.clear_playlist_btn)
+
+        controls_layout.addLayout(player_buttons_layout)
+        layout.addWidget(controls_group)
+
+        self.tabs.addTab(player_tab, "🎧 Player")
+
+    def create_analysis_tab(self):
+        """Cria a aba de análise"""
+        analysis_tab = QWidget()
+        layout = QVBoxLayout(analysis_tab)
+
+        # Adicione aqui componentes de análise visual
+        analysis_group = QGroupBox("📊 Análise de Sinais")
+        analysis_layout = QVBoxLayout(analysis_group)
+
+        analysis_label = QLabel("Recursos de análise visual em desenvolvimento...")
+        analysis_label.setAlignment(QtCore.Qt.AlignCenter)
+        analysis_layout.addWidget(analysis_label)
+
+        layout.addWidget(analysis_group)
+        layout.addStretch()
+
+        self.tabs.addTab(analysis_tab, "📈 Análise")
+
+    def create_log_area(self, main_layout):
+        """Cria a área de log"""
+        log_group = QGroupBox("📋 Log do Sistema")
+        log_layout = QVBoxLayout(log_group)
+
+        log_buttons_layout = QHBoxLayout()
+        self.clear_log_btn = QPushButton("🗑️ Limpar Log")
+        self.clear_log_btn.clicked.connect(self.clear_log)
+        log_buttons_layout.addWidget(self.clear_log_btn)
+
+        self.save_log_btn = QPushButton("💾 Salvar Log")
+        self.save_log_btn.clicked.connect(self.save_log)
+        log_buttons_layout.addWidget(self.save_log_btn)
+
+        log_buttons_layout.addStretch()
+        log_layout.addLayout(log_buttons_layout)
+
+        self.log_text = QTextEdit()
+        self.log_text.setMaximumHeight(150)
+        log_layout.addWidget(self.log_text)
+
+        main_layout.addWidget(log_group)
+
+    def setup_connections(self):
+        """Configura as conexões de sinais"""
+        self.player_update_timer = QTimer()
+        self.player_update_timer.timeout.connect(self.update_player_ui)
+        self.player_update_timer.start(500)
+
+    def setup_timers(self):
+        """Configura os timers da aplicação"""
+        self.assembly_timer = QTimer()
+        self.assembly_timer.timeout.connect(self.update_assembly_status)
+        self.assembly_timer.start(5000)
+
+        self.metrics_timer = QTimer()
+        self.metrics_timer.timeout.connect(self.update_performance_metrics)
+        self.metrics_timer.start(2000)
+
+    # ===============================================
+    # MÉTODOS DE UI E INTERAÇÃO
+    # ===============================================
+    def update_mode_diagram(self, mode):
+        """Atualiza o diagrama do modo selecionado"""
+        self.mode_diagram.mode_name = mode
+        self.mode_diagram.update()
+
+    def select_file(self):
+        """Seleciona arquivo para codificação"""
+        file_path, _ = QFileDialog.getOpenFileName(self, "Selecionar Arquivo")
+        if file_path:
+            self.file_path_label.setText(file_path)
+            self.update_file_stats(file_path)
+
+    def update_file_stats(self, file_path):
+        """Atualiza estatísticas do arquivo selecionado"""
+        try:
+            file_size = os.path.getsize(file_path)
+            mode = self.mode_combo.currentText()
+            symbol_rate = self.symbol_rate_spin.value()
+            compress = self.compress_check.isChecked()
+
+            stats = get_encoding_stats(file_path, mode, compress, symbol_rate)
+
+            stats_text = f"""
+📊 ESTATÍSTICAS DE TRANSMISSÃO:
+
+📁 Arquivo: {os.path.basename(file_path)}
+📏 Tamanho Original: {file_size / 1024:.1f} KB
+🎯 Modo: {mode}
+⚡ Taxa de Símbolo: {symbol_rate} baud
+📦 Compressão: {'Ativada' if compress else 'Desativada'}
+
+⏱️ Duração Estimada: {stats['duration_min']:.1f} minutos
+📈 Taxa de Dados: {stats['bitrate_bps']:.0f} bps
+📉 Tamanho Efetivo: {stats['effective_size'] / 1024:.1f} KB
+🔍 Razão de Compressão: {stats['compression_ratio']:.2f}
+"""
+            self.stats_text.setPlainText(stats_text)
+
+        except Exception as e:
+            self.log_message(f"❌ Erro ao calcular estatísticas: {e}")
+
+    def encode_file_button_clicked(self):
+        """Inicia a codificação do arquivo"""
+        file_path = self.file_path_label.text()
+        if not file_path or file_path == "Nenhum arquivo selecionado":
+            QMessageBox.warning(self, "Atenção", "Por favor, selecione um arquivo primeiro.")
+            return
+
+        mode = self.mode_combo.currentText()
+        compress = self.compress_check.isChecked()
+        symbol_rate = self.symbol_rate_spin.value()
+        target_duration_min = self.duration_spin.value()
+
+        self.encode_worker = EncodeWorker(file_path, mode, compress, symbol_rate, target_duration_min)
+        self.encode_worker.finished.connect(self.on_encode_finished)
+        self.encode_worker.error.connect(self.on_encode_error)
+        self.encode_worker.progress.connect(self.on_encode_progress)
+        self.encode_worker.cancelled.connect(self.on_encode_cancelled)
+
+        self.encode_thread = QtCore.QThread()
+        self.encode_worker.moveToThread(self.encode_thread)
+        self.encode_thread.started.connect(self.encode_worker.run)
+        self.encode_thread.start()
+
+        self.encode_button.setEnabled(False)
+        self.cancel_encode_button.setEnabled(True)
+        self.log_message(f"🚀 Iniciando codificação de {os.path.basename(file_path)} no modo {mode}")
+
+    def on_encode_progress(self, current, total):
+        """Atualiza o progresso da codificação"""
+        progress = int((current / total) * 100) if total > 0 else 0
+        self.encode_progress.setValue(progress)
+
+    def on_encode_finished(self, result):
+        """Finalização da codificação"""
+        self.encode_thread.quit()
+        self.encode_thread.wait()
+
+        self.encode_button.setEnabled(True)
+        self.cancel_encode_button.setEnabled(False)
+        self.encode_progress.setValue(0)
+
+        self.log_message(f"✅ Codificação concluída: {result}")
+        self.add_file_to_playlist(result)
+
+        QMessageBox.information(self, "Sucesso", f"Arquivo codificado com sucesso!\n{result}")
+
+    def on_encode_error(self, error):
+        """Erro na codificação"""
+        self.encode_thread.quit()
+        self.encode_thread.wait()
+
+        self.encode_button.setEnabled(True)
+        self.cancel_encode_button.setEnabled(False)
+        self.encode_progress.setValue(0)
+
+        self.log_message(f"❌ Erro na codificação: {error}")
+        QMessageBox.critical(self, "Erro", f"Falha na codificação:\n{error}")
+
+    def on_encode_cancelled(self):
+        """Cancelamento da codificação"""
+        self.encode_thread.quit()
+        self.encode_thread.wait()
+
+        self.encode_button.setEnabled(True)
+        self.cancel_encode_button.setEnabled(False)
+        self.encode_progress.setValue(0)
+
+        self.log_message("⏹️ Codificação cancelada pelo usuário")
+
+    def start_record(self):
+        """Inicia a gravação para decodificação"""
+        mode = self.decode_mode_combo.currentText()
+        sr = self.decode_sr_spin.value()
+
+        self.record_thread = WorkerRecord(duration=30, mode=mode, sr=sr)
+        self.record_thread.finished.connect(self.on_record_finished)
+        self.record_thread.volume.connect(self.volume_meter.setValue)
+        self.record_thread.start()
+
+        self.record_button.setEnabled(False)
+        self.log_message("🎤 Iniciando gravação de 30 segundos...")
+
+    def on_record_finished(self, saved):
+        """Finalização da gravação"""
+        self.record_button.setEnabled(True)
+        self.volume_meter.setValue(0)
+
+        if saved:
+            self.log_message(f"✅ {len(saved)} arquivo(s) decodificado(s) com sucesso!")
+            for file in saved:
+                self.log_message(f"📁 Salvo: {file}")
+        else:
+            self.log_message("❌ Nenhum arquivo foi decodificado da gravação")
+
+    def decode_wav_file(self):
+        """Decodifica um arquivo WAV"""
+        file_path, _ = QFileDialog.getOpenFileName(self, "Selecionar Arquivo WAV", "", "Arquivos WAV (*.wav)")
+        if file_path:
+            mode = self.decode_mode_combo.currentText()
+            sr = self.decode_sr_spin.value()
+
+            try:
+                saved = decode_wav_file(file_path, mode, sr)
+                if saved:
+                    self.log_message(f"✅ {len(saved)} arquivo(s) decodificado(s) de {os.path.basename(file_path)}")
+                else:
+                    self.log_message(f"❌ Não foi possível decodificar {os.path.basename(file_path)}")
+            except Exception as e:
+                self.log_message(f"❌ Erro na decodificação: {e}")
+
+    def update_assembly_status(self):
+        """Atualiza o status de montagem de arquivos"""
+        status = get_assembly_status()
+        if status:
+            status_text = "📦 ARQUIVOS SENDO MONTADOS:\n\n"
+            for item in status:
+                status_text += f"📁 {item['filename']}\n"
+                status_text += f"   📊 Progresso: {item['received']}/{item['total']} partes ({item['progress']:.1f}%)\n"
+                if item['missing_parts']:
+                    status_text += f"   ⚠️  Partes faltando: {item['missing_parts'][:5]}{'...' if len(item['missing_parts']) > 5 else ''}\n"
+                status_text += "\n"
+            self.assembly_status.setPlainText(status_text)
+        else:
+            self.assembly_status.setPlainText("📭 Nenhum arquivo em montagem no momento")
+
+    def update_performance_metrics(self):
+        """Atualiza as métricas de desempenho"""
+        metrics = PerformanceMonitor().get_system_metrics()
+        self.status_widget.update_metrics(metrics)
+
+        # Atualizar estatísticas de recepção
+        stats = get_reception_stats()
+        stats_text = f"""
+📊 ESTATÍSTICAS DE RECEPÇÃO:
+
+📁 Arquivos Recebidos: {stats['total_files']}
+📏 Bytes Recebidos: {stats['total_bytes'] / 1024:.1f} KB
+🎯 Taxa de Sucesso: {stats['success_rate']:.1f}%
+⭐ Qualidade Média: {stats['average_quality']:.3f}
+🕒 Última Recepção: {time.ctime(stats['last_reception']) if stats['last_reception'] else 'Nunca'}
+
+📈 Duplicatas Rejeitadas: {stats['duplicates_rejected']}
+🔀 Partes Reordenadas: {stats['parts_reordered']}
+"""
+        self.reception_stats.setPlainText(stats_text)
+
+    # ===============================================
+    # MÉTODOS DO PLAYER
+    # ===============================================
+    def update_player_ui(self):
+        """Atualiza a interface do player"""
+        progress = self.audio_player.get_progress()
+        self.playback_progress.setValue(int(progress))
+
+        # Atualizar cores dos itens na playlist
+        for i in range(self.playlist_widget.count()):
+            item = self.playlist_widget.item(i)
+            file_path = item.data(QtCore.Qt.UserRole)
+
+            if file_path in self.played_files:
+                item.setBackground(QColor(COLORS['success']))
+                item.setForeground(QColor(COLORS['light']))
+            elif file_path in self.playing_files:
+                item.setBackground(QColor(COLORS['warning']))
+                item.setForeground(QColor(COLORS['dark']))
+            else:
+                item.setBackground(QColor(COLORS['dark']))
+                item.setForeground(QColor(COLORS['light']))
+
+        # Atualizar informação do arquivo atual
+        if self.audio_player.is_playing and self.audio_player.current_file:
+            current_file = os.path.basename(self.audio_player.current_file)
+            progress_text = f"▶️ Reproduzindo: {current_file} ({progress:.1f}%)"
+            self.now_playing_label.setText(progress_text)
+            self.now_playing_label.setStyleSheet(
+                f"color: {COLORS['success']}; font-weight: bold; background: {COLORS['dark']}; padding: 5px; border-radius: 3px;")
+        elif self.audio_player.current_file and not self.audio_player.is_playing:
+            current_file = os.path.basename(self.audio_player.current_file)
+            self.now_playing_label.setText(f"⏸️ Pausado: {current_file}")
+            self.now_playing_label.setStyleSheet(
+                f"color: {COLORS['warning']}; font-style: italic; background: {COLORS['dark']}; padding: 5px; border-radius: 3px;")
+        else:
+            self.now_playing_label.setText("⏹️ Nenhum arquivo em reprodução")
+            self.now_playing_label.setStyleSheet(
+                f"color: {COLORS['light']}; font-style: italic; background: {COLORS['dark']}; padding: 5px; border-radius: 3px;")
+
+        # Verificar se a reprodução terminou
+        if self.audio_player.update_playback():
+            if self.audio_player.current_file:
+                self.played_files.add(self.audio_player.current_file)
+                self.playing_files.discard(self.audio_player.current_file)
+
+    def add_file_to_playlist(self, file_path):
+        """Adiciona um arquivo à playlist"""
+        if not os.path.exists(file_path):
+            return
+
+        # Verificar se já existe na playlist
+        for i in range(self.playlist_widget.count()):
+            item = self.playlist_widget.item(i)
+            if item.data(QtCore.Qt.UserRole) == file_path:
+                return
+
+        # Adicionar novo item
+        item = QListWidgetItem(os.path.basename(file_path))
+        item.setData(QtCore.Qt.UserRole, file_path)
+        self.playlist_widget.addItem(item)
+
+        # Marcar como não reproduzido
+        self.played_files.discard(file_path)
+        self.playing_files.discard(file_path)
+
+        self.log_message(f"📋 Arquivo adicionado à playlist: {os.path.basename(file_path)}")
+
+    def on_playlist_item_double_click(self, item):
+        """Quando o usuário clica duas vezes em um item da playlist"""
+        file_path = item.data(QtCore.Qt.UserRole)
+        self.play_audio_file(file_path)
+
+    def on_play_selected(self):
+        """Reproduz o arquivo selecionado na playlist"""
+        current_item = self.playlist_widget.currentItem()
+        if current_item:
+            file_path = current_item.data(QtCore.Qt.UserRole)
+            self.play_audio_file(file_path)
+        else:
+            QMessageBox.warning(self, "Atenção", "Por favor, selecione um arquivo da playlist primeiro.")
+
+    def play_audio_file(self, file_path):
+        """Reproduz um arquivo de áudio"""
+        if self.audio_player.load_file(file_path):
+            self.audio_player.play()
+            self.playing_files.add(file_path)
+            self.played_files.discard(file_path)
+            self.log_message(f"🎵 Reproduzindo: {os.path.basename(file_path)}")
+        else:
+            QMessageBox.warning(self, "Erro", f"Não foi possível reproduzir o arquivo: {os.path.basename(file_path)}")
+
+    def on_pause(self):
+        """Pausa a reprodução"""
+        self.audio_player.pause()
+        self.log_message("⏸️ Reprodução pausada")
+
+    def on_stop(self):
+        """Para a reprodução"""
+        self.audio_player.stop()
+        if self.audio_player.current_file:
+            self.playing_files.discard(self.audio_player.current_file)
+        self.log_message("⏹️ Reprodução parada")
+
+    def on_clear_playlist(self):
+        """Limpa a playlist"""
+        if self.playlist_widget.count() > 0:
+            reply = QMessageBox.question(self, "Confirmar", "Tem certeza que deseja limpar toda a playlist?",
+                                         QMessageBox.Yes | QMessageBox.No)
+            if reply == QMessageBox.Yes:
+                self.audio_player.stop()
+                self.playlist_widget.clear()
+                self.played_files.clear()
+                self.playing_files.clear()
+                self.log_message("🗑️ Playlist limpa")
+
+    # ===============================================
+    # MÉTODOS DE LOG E UTILITÁRIOS
+    # ===============================================
+    def log_message(self, message):
+        """Adiciona mensagem ao log"""
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        self.log_text.append(f"[{timestamp}] {message}")
+        self.log_manager.write_log("INFO", message)
+
+    def clear_log(self):
+        """Limpa o log"""
+        self.log_text.clear()
+        self.log_message("📋 Log limpo pelo usuário")
+
+    def save_log(self):
+        """Salva o log em arquivo"""
+        filename, _ = QFileDialog.getSaveFileName(self, "Salvar Log", "filebeep_log.txt", "Arquivos de Texto (*.txt)")
+        if filename:
+            try:
+                with open(filename, 'w', encoding='utf-8') as f:
+                    f.write(self.log_text.toPlainText())
+                self.log_message(f"💾 Log salvo em: {filename}")
+                QMessageBox.information(self, "Log Salvo", f"Log salvo com sucesso em:\n{filename}")
+            except Exception as e:
+                self.log_message(f"❌ Erro ao salvar log: {e}")
+                QMessageBox.critical(self, "Erro", f"Erro ao salvar log: {e}")
+
+    def cancel_encoding(self):
+        """Cancela a codificação em andamento"""
+        if self.encode_worker:
+            self.encode_worker.cancel()
+
+    def closeEvent(self, event):
+        """Evento de fechamento da aplicação"""
+        # Parar reprodução de áudio
+        self.audio_player.stop()
+        pygame.mixer.quit()
+
+        # Parar threads
+        if self.record_thread and self.record_thread.isRunning():
+            self.record_thread._running = False
+            self.record_thread.wait(2000)
+
+        if self.encode_worker:
+            self.encode_worker.cancel()
+
+        if self.encode_thread and self.encode_thread.isRunning():
+            self.encode_thread.quit()
+            self.encode_thread.wait(1000)
+
+        # Parar timers
+        self.assembly_timer.stop()
+        self.metrics_timer.stop()
+        self.player_update_timer.stop()
+
+        self.log_message("👋 Aplicação encerrada")
+        event.accept()
+
+
+# ===============================================
+# CLASSES AUXILIARES (mantidas da versão anterior)
+# ===============================================
+class AudioPlayer:
+    def __init__(self):
+        pygame.mixer.init()
+        self.current_file = None
+        self.is_playing = False
+        self.playback_position = 0
+        self.total_length = 0
+        self.playback_timer = QTimer()
+        self.playback_timer.timeout.connect(self.update_playback)
+
+    def load_file(self, file_path):
+        try:
+            if self.is_playing:
+                self.stop()
+            pygame.mixer.music.load(file_path)
+            self.current_file = file_path
+            self.is_playing = False
+            self.playback_position = 0
+            return True
+        except Exception as e:
+            print(f"Erro ao carregar áudio: {e}")
+            return False
+
+    def play(self):
+        if self.current_file:
+            pygame.mixer.music.play()
+            self.is_playing = True
+            self.playback_timer.start(100)
+
+    def pause(self):
+        if self.is_playing:
+            pygame.mixer.music.pause()
+            self.is_playing = False
+            self.playback_timer.stop()
+
+    def stop(self):
+        pygame.mixer.music.stop()
+        self.is_playing = False
+        self.playback_timer.stop()
+        self.playback_position = 0
+
+    def update_playback(self):
+        if pygame.mixer.music.get_busy():
+            self.playback_position += 0.1
+            return False
+        else:
+            self.is_playing = False
+            self.playback_timer.stop()
+            return True
+
+    def get_progress(self):
+        if self.total_length > 0:
+            return (self.playback_position / self.total_length) * 100
+        return 0
+
+
 class LogManager:
     def __init__(self):
         self.log_file = f"filebeep_log_{int(time.time())}.txt"
@@ -201,1101 +1272,19 @@ class LogManager:
             print(f"Erro na rotação de log: {e}")
 
 
-# Adicione esta classe antes da classe ModernMainWindow
-class AudioPlayer:
-    def __init__(self):
-        pygame.mixer.init()
-        self.current_file = None
-        self.is_playing = False
-        self.playback_position = 0
-        self.total_length = 0
-        self.playback_timer = QTimer()
-        self.playback_timer.timeout.connect(self.update_playback)
-
-    def load_file(self, file_path):
-        try:
-            if self.is_playing:
-                self.stop()
-            pygame.mixer.music.load(file_path)
-            self.current_file = file_path
-            self.is_playing = False
-            self.playback_position = 0
-            # Obter duração do arquivo (aproximada)
-            import wave
-            with wave.open(file_path, 'rb') as wav_file:
-                frames = wav_file.getnframes()
-                rate = wav_file.getframerate()
-                self.total_length = frames / float(rate)
-            return True
-        except Exception as e:
-            print(f"Erro ao carregar arquivo: {e}")
-            return False
-
-    def play(self):
-        if self.current_file and not self.is_playing:
-            pygame.mixer.music.play()
-            self.is_playing = True
-            self.playback_timer.start(100)  # Atualizar a cada 100ms
-
-    def pause(self):
-        if self.is_playing:
-            pygame.mixer.music.pause()
-            self.is_playing = False
-            self.playback_timer.stop()
-
-    def stop(self):
-        pygame.mixer.music.stop()
-        self.is_playing = False
-        self.playback_position = 0
-        self.playback_timer.stop()
-
-    def update_playback(self):
-        if self.is_playing:
-            self.playback_position += 0.1
-            if self.playback_position >= self.total_length:
-                self.stop()
-                return True  # Reprodução concluída
-        return False
-
-    def get_progress(self):
-        if self.total_length > 0:
-            return (self.playback_position / self.total_length) * 100
-        return 0
-
-
-class ModernMainWindow(QtWidgets.QMainWindow):
-    def __init__(self):
-        super().__init__()
-        self.setWindowTitle("FileBeep Advanced v2 - Professional Data Transfer")
-        self.resize(1000, 750)
-        self.setup_ui()
-        self.last_wav = None
-        self.record_thread = None
-        self.encode_worker = None
-        self.encode_thread = None
-
-        # Sistema de player de áudio
-        pygame.mixer.init()
-        self.audio_player = AudioPlayer()
-        self.played_files = set()  # Arquivos que já foram reproduzidos completamente
-        self.playing_files = set()  # Arquivos atualmente em reprodução
-
-        self.assembly_timer = QtCore.QTimer()
-        self.assembly_timer.timeout.connect(self.update_assembly_status)
-        self.assembly_timer.start(2000)
-
-        self.metrics_timer = QtCore.QTimer()
-        self.metrics_timer.timeout.connect(self.update_real_time_metrics)
-        self.metrics_timer.start(1000)
-
-        # Timer para atualizar a interface do player
-        self.player_update_timer = QtCore.QTimer()
-        self.player_update_timer.timeout.connect(self.update_player_ui)
-        self.player_update_timer.start(500)  # Atualizar a cada 500ms
-
-        self.setup_advanced_features()
-
-    def setup_advanced_features(self):
-        """Configura recursos avançados"""
-        # Sistema de temas
-        self.themes = {
-            'dark': self.load_dark_theme,
-            'light': self.load_light_theme,
-            'blue': self.load_blue_theme
-        }
-
-        # Monitor de desempenho
-        self.performance_monitor = PerformanceMonitor()
-        self.performance_monitor.update_metrics.connect(self.update_performance_metrics)
-        self.performance_monitor.start()
-
-        # Sistema de logs avançado
-        self.log_manager = LogManager()
-
-    def load_dark_theme(self):
-        """Tema escuro moderno"""
-        self.setStyleSheet("""
-            QMainWindow {
-                background-color: #2b2b2b;
-                color: #ffffff;
-            }
-            QTabWidget::pane {
-                border: 1px solid #555;
-                background-color: #2b2b2b;
-            }
-            QTabBar::tab {
-                background-color: #3c3c3c;
-                color: #ffffff;
-                padding: 8px 16px;
-                border: 1px solid #555;
-            }
-            QTabBar::tab:selected {
-                background-color: #0078d4;
-            }
-            QGroupBox {
-                color: #ffffff;
-                border: 1px solid #555;
-                margin-top: 1ex;
-                font-weight: bold;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 10px;
-                padding: 0 5px 0 5px;
-            }
-        """)
-
-    def load_light_theme(self):
-        """Tema claro"""
-        self.setStyleSheet("")
-
-    def load_blue_theme(self):
-        """Tema azul"""
-        self.setStyleSheet("""
-            QMainWindow {
-                background-color: #e6f3ff;
-            }
-            QTabBar::tab:selected {
-                background-color: #0078d4;
-                color: white;
-            }
-        """)
-
-    def update_performance_metrics(self, metrics):
-        """Atualiza métricas de desempenho"""
-        if hasattr(self, 'cpu_usage'):
-            self.cpu_usage.setValue(int(metrics['cpu']))
-        if hasattr(self, 'memory_usage'):
-            self.memory_usage.setValue(int(metrics['memory']))
-        if hasattr(self, 'disk_io'):
-            self.disk_io.setText(f"IO: {metrics['disk_io']:.1f} MB/s")
-
-    def create_advanced_monitor_tab(self):
-        """Aba de monitoramento avançado"""
-        widget = QtWidgets.QWidget()
-        layout = QtWidgets.QVBoxLayout(widget)
-
-        if PYQTGRAPH_AVAILABLE:
-            # Gráfico em tempo real
-            self.signal_plot = pg.PlotWidget(title="Sinal em Tempo Real")
-            self.signal_plot.setBackground('#2b2b2b')
-            layout.addWidget(self.signal_plot)
-        else:
-            layout.addWidget(QtWidgets.QLabel("PyQtGraph não disponível para gráficos"))
-
-        # Métricas avançadas
-        metrics_grid = QtWidgets.QGridLayout()
-
-        self.cpu_usage = QtWidgets.QProgressBar()
-        self.memory_usage = QtWidgets.QProgressBar()
-        self.disk_io = QtWidgets.QLabel("IO: 0 MB/s")
-
-        metrics_grid.addWidget(QtWidgets.QLabel("CPU:"), 0, 0)
-        metrics_grid.addWidget(self.cpu_usage, 0, 1)
-        metrics_grid.addWidget(QtWidgets.QLabel("Memória:"), 1, 0)
-        metrics_grid.addWidget(self.memory_usage, 1, 1)
-        metrics_grid.addWidget(self.disk_io, 2, 0, 1, 2)
-
-        layout.addLayout(metrics_grid)
-        return widget
-
-    def setup_ui(self):
-        central_widget = QtWidgets.QWidget()
-        self.setCentralWidget(central_widget)
-        main_layout = QtWidgets.QVBoxLayout(central_widget)
-
-        self.tab_widget = QtWidgets.QTabWidget()
-
-        self.transmit_tab = self.create_transmit_tab()
-        self.receive_tab = self.create_receive_tab()
-        self.monitor_tab = self.create_monitor_tab()
-        self.settings_tab = self.create_settings_tab()
-
-        self.tab_widget.addTab(self.transmit_tab, "📤 Transmitir")
-        self.tab_widget.addTab(self.receive_tab, "📥 Receber")
-        self.tab_widget.addTab(self.monitor_tab, "📊 Monitor")
-        self.tab_widget.addTab(self.settings_tab, "⚙️ Configurações")
-
-        main_layout.addWidget(self.tab_widget)
-
-        self.status_bar = self.statusBar()
-        self.status_bar.showMessage("Sistema inicializado e pronto")
-
-    def create_transmit_tab(self):
-        widget = QtWidgets.QWidget()
-        layout = QtWidgets.QVBoxLayout(widget)
-
-        config_group = QtWidgets.QGroupBox("Configurações de Transmissão")
-        config_layout = QtWidgets.QGridLayout(config_group)
-
-        config_layout.addWidget(QtWidgets.QLabel("Modulação:"), 0, 0)
-        self.mode_combo = QtWidgets.QComboBox()
-        self.mode_combo.addItems(MODES)
-        self.mode_combo.currentTextChanged.connect(self.on_mode_changed)
-        config_layout.addWidget(self.mode_combo, 0, 1)
-
-        config_layout.addWidget(QtWidgets.QLabel("Taxa de Símbolo:"), 1, 0)
-        self.sr_spin = QtWidgets.QSpinBox()
-        self.sr_spin.setRange(600, 38400)
-        self.sr_spin.setValue(9600)
-        config_layout.addWidget(self.sr_spin, 1, 1)
-
-        self.compress_check = QtWidgets.QCheckBox("Compressão Ativa")
-        self.compress_check.setChecked(True)
-        config_layout.addWidget(self.compress_check, 2, 0, 1, 2)
-
-        self.mode_info_label = QtWidgets.QLabel()
-        self.mode_info_label.setStyleSheet("color: #666; font-size: 10pt;")
-        config_layout.addWidget(self.mode_info_label, 3, 0, 1, 2)
-
-        layout.addWidget(config_group)
-
-        action_layout = QtWidgets.QHBoxLayout()
-
-        self.enc_btn = QtWidgets.QPushButton("🔒 Codificar Arquivo Único")
-        self.enc_btn.clicked.connect(self.on_encode)
-        self.enc_btn.setStyleSheet("QPushButton { padding: 8px; font-weight: bold; }")
-        action_layout.addWidget(self.enc_btn)
-
-        self.enc_large_btn = QtWidgets.QPushButton("📦 Codificar Arquivo Grande (Multi-partes)")
-        self.enc_large_btn.clicked.connect(self.on_encode_large)
-        self.enc_large_btn.setStyleSheet("QPushButton { padding: 8px; font-weight: bold; }")
-        action_layout.addWidget(self.enc_large_btn)
-
-        layout.addLayout(action_layout)
-
-        transmit_layout = QtWidgets.QHBoxLayout()
-
-        self.play_btn = QtWidgets.QPushButton("▶️ Reproduzir Último Arquivo")
-        self.play_btn.clicked.connect(self.on_play)
-        transmit_layout.addWidget(self.play_btn)
-
-        self.transmit_btn = QtWidgets.QPushButton("📡 Transmitir (Reproduzir)")
-        self.transmit_btn.clicked.connect(self.on_transmit)
-        self.transmit_btn.setStyleSheet("QPushButton { background-color: #4CAF50; color: white; padding: 8px; }")
-        transmit_layout.addWidget(self.transmit_btn)
-
-        layout.addLayout(transmit_layout)
-
-        self.cancel_encode_btn = QtWidgets.QPushButton("❌ Cancelar Codificação")
-        self.cancel_encode_btn.clicked.connect(self.on_cancel_encode)
-        self.cancel_encode_btn.setVisible(False)
-        self.cancel_encode_btn.setStyleSheet("QPushButton { background-color: #ff6b6b; color: white; padding: 8px; }")
-        layout.addWidget(self.cancel_encode_btn)
-
-        self.progress = QtWidgets.QProgressBar()
-        self.progress.setVisible(False)
-        layout.addWidget(self.progress)
-
-        self.detailed_progress = QtWidgets.QLabel("")
-        self.detailed_progress.setStyleSheet("QLabel { padding: 5px; color: #666; }")
-        self.detailed_progress.setVisible(False)
-        layout.addWidget(self.detailed_progress)
-
-        stats_group = QtWidgets.QGroupBox("Estatísticas da Transmissão")
-        stats_layout = QtWidgets.QGridLayout(stats_group)
-
-        self.file_size_label = QtWidgets.QLabel("Tamanho do arquivo: -")
-        self.estimated_time_label = QtWidgets.QLabel("Tempo estimado: -")
-        self.efficiency_label = QtWidgets.QLabel("Eficiência: -")
-
-        stats_layout.addWidget(self.file_size_label, 0, 0)
-        stats_layout.addWidget(self.estimated_time_label, 0, 1)
-        stats_layout.addWidget(self.efficiency_label, 1, 0)
-
-        fec_layout = QtWidgets.QHBoxLayout()
-        fec_layout.addWidget(QtWidgets.QLabel("Correção de Erro:"))
-
-        self.fec_combo = QtWidgets.QComboBox()
-        self.fec_combo.addItems(["Nenhum", "Reed-Solomon", "Convolucional"])
-        fec_layout.addWidget(self.fec_combo)
-
-        config_layout.addLayout(fec_layout, 4, 0, 1, 2)
-
-        layout.addWidget(stats_group)
-
-        # ===============================================
-        # Player de Áudio Integrado
-        # ===============================================
-        player_group = QtWidgets.QGroupBox("🎵 Player de Transmissão")
-        player_layout = QtWidgets.QGridLayout(player_group)
-
-        # Lista de arquivos para reprodução
-        self.playlist_widget = QtWidgets.QListWidget()
-        self.playlist_widget.itemDoubleClicked.connect(self.on_playlist_item_double_click)
-        player_layout.addWidget(self.playlist_widget, 0, 0, 1, 4)
-
-        # Controles do player
-        self.play_btn = QtWidgets.QPushButton("▶️ Reproduzir")
-        self.play_btn.clicked.connect(self.on_play_selected)
-        player_layout.addWidget(self.play_btn, 1, 0)
-
-        self.pause_btn = QtWidgets.QPushButton("⏸️ Pausar")
-        self.pause_btn.clicked.connect(self.on_pause)
-        player_layout.addWidget(self.pause_btn, 1, 1)
-
-        self.stop_btn = QtWidgets.QPushButton("⏹️ Parar")
-        self.stop_btn.clicked.connect(self.on_stop)
-        player_layout.addWidget(self.stop_btn, 1, 2)
-
-        self.clear_playlist_btn = QtWidgets.QPushButton("🗑️ Limpar Lista")
-        self.clear_playlist_btn.clicked.connect(self.on_clear_playlist)
-        player_layout.addWidget(self.clear_playlist_btn, 1, 3)
-
-        # Barra de progresso
-        self.playback_progress = QtWidgets.QProgressBar()
-        self.playback_progress.setRange(0, 100)
-        player_layout.addWidget(self.playback_progress, 2, 0, 1, 4)
-
-        # Informações do arquivo atual
-        self.now_playing_label = QtWidgets.QLabel("Nenhum arquivo selecionado")
-        self.now_playing_label.setStyleSheet("QLabel { color: #666; font-style: italic; }")
-        player_layout.addWidget(self.now_playing_label, 3, 0, 1, 4)
-
-        layout.addWidget(player_group)
-
-        layout.addStretch()
-        return widget
-
-    def create_receive_tab(self):
-        widget = QtWidgets.QWidget()
-        layout = QtWidgets.QVBoxLayout(widget)
-
-        config_group = QtWidgets.QGroupBox("Configurações de Recepção")
-        config_layout = QtWidgets.QGridLayout(config_group)
-
-        config_layout.addWidget(QtWidgets.QLabel("Modulação:"), 0, 0)
-        self.recv_mode_combo = QtWidgets.QComboBox()
-        self.recv_mode_combo.addItems(MODES)
-        config_layout.addWidget(self.recv_mode_combo, 0, 1)
-
-        config_layout.addWidget(QtWidgets.QLabel("Taxa de Símbolo:"), 1, 0)
-        self.recv_sr_spin = QtWidgets.QSpinBox()
-        self.recv_sr_spin.setRange(600, 38400)
-        self.recv_sr_spin.setValue(9600)
-        config_layout.addWidget(self.recv_sr_spin, 1, 1)
-
-        layout.addWidget(config_group)
-
-        control_layout = QtWidgets.QHBoxLayout()
-
-        self.recv_btn = QtWidgets.QPushButton("🎤 Iniciar Recepção")
-        self.recv_btn.setCheckable(True)
-        self.recv_btn.clicked.connect(self.on_toggle_receive)
-        self.recv_btn.setStyleSheet("QPushButton { padding: 8px; font-weight: bold; }")
-        control_layout.addWidget(self.recv_btn)
-
-        self.decode_file_btn = QtWidgets.QPushButton("📁 Decodificar de Arquivo WAV")
-        self.decode_file_btn.clicked.connect(self.on_decode_file)
-        control_layout.addWidget(self.decode_file_btn)
-
-        layout.addLayout(control_layout)
-
-        volume_group = QtWidgets.QGroupBox("Nível de Entrada")
-        volume_layout = QtWidgets.QVBoxLayout(volume_group)
-
-        self.volmeter = QtWidgets.QProgressBar()
-        self.volmeter.setRange(0, 100)
-        self.volmeter.setValue(0)
-        self.volmeter.setStyleSheet("""
-            QProgressBar {
-                border: 2px solid grey;
-                border-radius: 5px;
-                text-align: center;
-                height: 20px;
-            }
-            QProgressBar::chunk {
-                background-color: #4CAF50;
-                border-radius: 3px;
-            }
-        """)
-        volume_layout.addWidget(self.volmeter)
-
-        layout.addWidget(volume_group)
-
-        self.assembly_status = QtWidgets.QLabel("Nenhum arquivo multi-partes sendo montado")
-        self.assembly_status.setStyleSheet("QLabel { padding: 8px; background-color: #f0f0f0; border-radius: 4px; }")
-        layout.addWidget(self.assembly_status)
-
-        files_group = QtWidgets.QGroupBox("Arquivos Recebidos")
-        files_layout = QtWidgets.QVBoxLayout(files_group)
-
-        self.received_files_list = QtWidgets.QListWidget()
-        files_layout.addWidget(self.received_files_list)
-
-        layout.addWidget(files_group)
-
-        return widget
-
-    def create_monitor_tab(self):
-        widget = QtWidgets.QWidget()
-        layout = QtWidgets.QVBoxLayout(widget)
-
-        metrics_group = QtWidgets.QGroupBox("Métricas em Tempo Real")
-        metrics_layout = QtWidgets.QGridLayout(metrics_group)
-
-        self.bitrate_label = QtWidgets.QLabel("Taxa de bits: 0 bps")
-        self.snr_label = QtWidgets.QLabel("SNR: -- dB")
-        self.ber_label = QtWidgets.QLabel("BER: --")
-        self.quality_label = QtWidgets.QLabel("Qualidade: --")
-
-        metrics_layout.addWidget(self.bitrate_label, 0, 0)
-        metrics_layout.addWidget(self.snr_label, 0, 1)
-        metrics_layout.addWidget(self.ber_label, 1, 0)
-        metrics_layout.addWidget(self.quality_label, 1, 1)
-
-        layout.addWidget(metrics_group)
-
-        log_group = QtWidgets.QGroupBox("Log de Atividades")
-        log_layout = QtWidgets.QVBoxLayout(log_group)
-
-        self.log_text = QtWidgets.QTextEdit()
-        self.log_text.setMaximumHeight(300)
-        self.log_text.setReadOnly(True)
-        log_layout.addWidget(self.log_text)
-
-        log_controls = QtWidgets.QHBoxLayout()
-        self.clear_log_btn = QtWidgets.QPushButton("Limpar Log")
-        self.clear_log_btn.clicked.connect(self.log_text.clear)
-        log_controls.addWidget(self.clear_log_btn)
-
-        self.save_log_btn = QtWidgets.QPushButton("Salvar Log")
-        self.save_log_btn.clicked.connect(self.save_log)
-        log_controls.addWidget(self.save_log_btn)
-
-        log_controls.addStretch()
-        log_layout.addLayout(log_controls)
-
-        layout.addWidget(log_group)
-
-        return widget
-
-    def create_settings_tab(self):
-        widget = QtWidgets.QWidget()
-        layout = QtWidgets.QVBoxLayout(widget)
-
-        audio_group = QtWidgets.QGroupBox("Configurações de Áudio")
-        audio_layout = QtWidgets.QFormLayout(audio_group)
-
-        self.sample_rate_combo = QtWidgets.QComboBox()
-        self.sample_rate_combo.addItems(["44100", "48000", "96000"])
-        self.sample_rate_combo.setCurrentText("96000")
-        audio_layout.addRow("Taxa de Amostragem:", self.sample_rate_combo)
-
-        self.audio_device_combo = QtWidgets.QComboBox()
-        self.populate_audio_devices()
-        audio_layout.addRow("Dispositivo de Áudio:", self.audio_device_combo)
-
-        layout.addWidget(audio_group)
-
-        file_group = QtWidgets.QGroupBox("Configurações de Arquivo")
-        file_layout = QtWidgets.QFormLayout(file_group)
-
-        self.cache_dir_edit = QtWidgets.QLineEdit(CACHE_DIR)
-        self.browse_cache_btn = QtWidgets.QPushButton("Procurar...")
-        self.browse_cache_btn.clicked.connect(self.browse_cache_dir)
-
-        cache_layout = QtWidgets.QHBoxLayout()
-        cache_layout.addWidget(self.cache_dir_edit)
-        cache_layout.addWidget(self.browse_cache_btn)
-        file_layout.addRow("Diretório de Cache:", cache_layout)
-
-        self.auto_clean_check = QtWidgets.QCheckBox("Limpar cache automaticamente")
-        self.auto_clean_check.setChecked(True)
-        file_layout.addRow(self.auto_clean_check)
-
-        layout.addWidget(file_group)
-
-        action_layout = QtWidgets.QHBoxLayout()
-
-        self.clear_cache_btn = QtWidgets.QPushButton("🧹 Limpar Cache")
-        self.clear_cache_btn.clicked.connect(self.clear_cache)
-        action_layout.addWidget(self.clear_cache_btn)
-
-        self.reset_settings_btn = QtWidgets.QPushButton("🔄 Restaurar Padrões")
-        self.reset_settings_btn.clicked.connect(self.reset_settings)
-        action_layout.addWidget(self.reset_settings_btn)
-
-        layout.addLayout(action_layout)
-        layout.addStretch()
-
-        return widget
-
-    def populate_audio_devices(self):
-        try:
-            devices = sd.query_devices()
-            for i, device in enumerate(devices):
-                if device['max_output_channels'] > 0:
-                    self.audio_device_combo.addItem(f"{device['name']} ({i})", i)
-        except Exception as e:
-            self.log_message(f"Erro ao listar dispositivos de áudio: {e}")
-
-    def on_mode_changed(self, mode):
-        mode_info = {
-            "FSK1200": "Lenta e robusta - Ideal para condições ruins",
-            "FSK9600": "Equilibrada - Bom para uso geral",
-            "BPSK": "Robusta - Boa imunidade a ruído",
-            "QPSK": "Eficiente - 2x velocidade do BPSK",
-            "8PSK": "Rápida - 3x velocidade do BPSK",
-            "FSK19200": "Alta velocidade - Para bons canais",
-            "OFDM4": "Avançada - Resistente a interferências",
-            "OFDM8": "Máxima velocidade - Para condições ideais",
-            "SSTV": "Para imagens - Velocidade muito lenta"
-        }
-        self.mode_info_label.setText(mode_info.get(mode, ""))
-
-    def update_real_time_metrics(self):
-        if self.record_thread and self.record_thread.isRunning():
-            self.bitrate_label.setText(f"Taxa de bits: {self.sr_spin.value()} bps")
-            self.snr_label.setText("SNR: 25 dB")
-            self.ber_label.setText("BER: 1e-5")
-            self.quality_label.setText("Qualidade: Excelente")
-
-    def log_message(self, message):
-        timestamp = time.strftime("%H:%M:%S")
-        self.log_text.append(f"[{timestamp}] {message}")
-        self.log_text.verticalScrollBar().setValue(
-            self.log_text.verticalScrollBar().maximum()
-        )
-
-    def set_status(self, message):
-        self.status_bar.showMessage(message)
-        self.log_message(message)
-
-    def on_encode(self):
-        fname, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Selecionar arquivo para codificar")
-        if not fname:
-            return
-
-        mode = self.mode_combo.currentText()
-        comp = self.compress_check.isChecked()
-        sr = self.sr_spin.value()
-
-        try:
-            stats = get_encoding_stats(fname, mode, comp, sr)
-            self.file_size_label.setText(f"Tamanho do arquivo: {stats['original_size']:,} bytes")
-            self.estimated_time_label.setText(f"Tempo estimado: {stats['duration_min']:.1f} min")
-            self.efficiency_label.setText(f"Eficiência: {stats['bytes_per_sec']:.0f} bytes/seg")
-        except Exception as e:
-            self.log_message(f"Erro ao calcular estatísticas: {e}")
-
-        self.set_status(f"Codificando {os.path.basename(fname)} com {mode}...")
-        self.progress.setVisible(True)
-        self.progress.setRange(0, 0)
-
-        def job():
-            try:
-                wav = encode_file(fname, mode=mode, compress=comp, symbol_rate=sr, split_large_files=False)
-                self.last_wav = wav
-                QtCore.QMetaObject.invokeMethod(self, "encode_finished",
-                                                QtCore.Qt.QueuedConnection,
-                                                QtCore.Q_ARG(str, wav))
-            except Exception as e:
-                QtCore.QMetaObject.invokeMethod(self, "encode_error",
-                                                QtCore.Qt.QueuedConnection,
-                                                QtCore.Q_ARG(str, str(e)))
-
-        threading.Thread(target=job, daemon=True).start()
-
-    def on_encode_large(self):
-        fname, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Selecionar arquivo grande para codificar em partes")
-        if not fname:
-            return
-
-        mode = self.mode_combo.currentText()
-        comp = self.compress_check.isChecked()
-        sr = self.sr_spin.value()
-
-        duration, ok = QtWidgets.QInputDialog.getInt(self, "Duração da Parte",
-                                                     "Duração alvo por parte (minutos):",
-                                                     value=1, min=1, max=10)
-        if not ok:
-            return
-
-        try:
-            stats = get_encoding_stats(fname, mode, comp, sr)
-            total_parts = max(1, int(stats['duration_min'] / duration))
-            self.file_size_label.setText(f"Tamanho: {stats['original_size']:,} bytes")
-            self.estimated_time_label.setText(f"Partes estimadas: {total_parts}")
-            self.efficiency_label.setText(f"Eficiência: {stats['bytes_per_sec']:.0f} bytes/seg")
-        except Exception as e:
-            self.log_message(f"Erro ao calcular estatísticas: {e}")
-
-        self.set_status(f"Codificando arquivo grande {os.path.basename(fname)} com {mode}...")
-        self.progress.setVisible(True)
-        self.progress.setRange(0, 100)
-        self.progress.setValue(0)
-        self.detailed_progress.setVisible(True)
-        self.detailed_progress.setText("Iniciando...")
-
-        self.cancel_encode_btn.setVisible(True)
-        self.enc_large_btn.setEnabled(False)
-        self.enc_btn.setEnabled(False)
-
-        self.encode_worker = EncodeWorker(fname, mode, comp, sr, duration)
-        self.encode_thread = QtCore.QThread()
-
-        self.encode_worker.moveToThread(self.encode_thread)
-        self.encode_worker.finished.connect(self.encode_large_finished)
-        self.encode_worker.error.connect(self.encode_large_error)
-        self.encode_worker.progress.connect(self.encode_progress_update)
-        self.encode_worker.cancelled.connect(self.encode_cancelled)
-
-        self.encode_thread.started.connect(self.encode_worker.run)
-        self.encode_thread.start()
-
-    def on_cancel_encode(self):
-        if self.encode_worker:
-            self.set_status("Cancelando codificação...")
-            self.encode_worker.cancel()
-
-    def encode_progress_update(self, current_part, total_parts):
-        progress = int((current_part / total_parts) * 100) if total_parts > 0 else 0
-        self.progress.setValue(progress)
-        self.detailed_progress.setText(f"Codificando parte {current_part}/{total_parts}")
-
-    @QtCore.pyqtSlot()
-    def encode_cancelled(self):
-        self.progress.setVisible(False)
-        self.detailed_progress.setVisible(False)
-        self.cancel_encode_btn.setVisible(False)
-        self.enc_large_btn.setEnabled(True)
-        self.enc_btn.setEnabled(True)
-
-        if self.encode_thread and self.encode_thread.isRunning():
-            self.encode_thread.quit()
-            self.encode_thread.wait(1000)
-
-        self.set_status("Codificação cancelada pelo usuário")
-        QtWidgets.QMessageBox.information(self, "Codificação Cancelada",
-                                          "A codificação do arquivo foi cancelada. Arquivos parciais foram removidos.")
-
-    @QtCore.pyqtSlot(str)
-    def encode_finished(self, wav):
-        self.progress.setVisible(False)
-        self.set_status(f"Codificado com sucesso: {os.path.basename(wav)}")
-        self.last_wav = wav
-        # Adicionar à playlist automaticamente
-        self.add_file_to_playlist(wav)
-
-    @QtCore.pyqtSlot(str)
-    def encode_large_finished(self, result):
-        self.progress.setVisible(False)
-        self.detailed_progress.setVisible(False)
-        self.cancel_encode_btn.setVisible(False)
-        self.enc_large_btn.setEnabled(True)
-        self.enc_btn.setEnabled(True)
-
-        if self.encode_thread and self.encode_thread.isRunning():
-            self.encode_thread.quit()
-            self.encode_thread.wait(1000)
-
-        if result.endswith('.playlist.txt'):
-            # Adicionar todas as partes à playlist
-            try:
-                with open(result, 'r', encoding='utf-8') as f:
-                    for line in f:
-                        if line.strip() and not line.startswith(('File:', 'Total parts:', 'Mode:', 'Symbol rate:',
-                                                                 'Original size:', 'Compression:', 'Parts:')):
-                            part_file = line.strip()
-                            part_path = os.path.join(CACHE_DIR, part_file)
-                            if os.path.exists(part_path):
-                                self.add_file_to_playlist(part_path)
-            except Exception as e:
-                print(f"Erro ao ler playlist: {e}")
-        else:
-            self.last_wav = result
-            self.add_file_to_playlist(result)
-            self.set_status(f"Codificado com sucesso: {os.path.basename(result)}")
-
-    @QtCore.pyqtSlot(str)
-    def encode_error(self, error):
-        self.progress.setVisible(False)
-        self.detailed_progress.setVisible(False)
-        self.cancel_encode_btn.setVisible(False)
-        self.enc_large_btn.setEnabled(True)
-        self.enc_btn.setEnabled(True)
-        self.set_status(f"Erro na codificação: {error}")
-        QtWidgets.QMessageBox.critical(self, "Erro na Codificação", f"Erro: {error}")
-
-    @QtCore.pyqtSlot(str)
-    def encode_large_error(self, error):
-        self.progress.setVisible(False)
-        self.detailed_progress.setVisible(False)
-        self.cancel_encode_btn.setVisible(False)
-        self.enc_large_btn.setEnabled(True)
-        self.enc_btn.setEnabled(True)
-        self.set_status(f"Erro na codificação: {error}")
-        QtWidgets.QMessageBox.critical(self, "Erro na Codificação", f"Erro: {error}")
-
-    def on_play(self):
-        if not self.last_wav or not os.path.exists(self.last_wav):
-            QtWidgets.QMessageBox.warning(self, "Sem arquivo WAV", "Por favor, codifique um arquivo primeiro.")
-            return
-
-        self.set_status("Reproduzindo WAV codificado...")
-        try:
-            data, sr = sf.read(self.last_wav, always_2d=False)
-            sd.play(data, sr)
-            sd.wait()
-            self.set_status("Reprodução concluída")
-        except Exception as e:
-            self.set_status(f"Erro na reprodução: {e}")
-
-    def on_transmit(self):
-        self.on_play()
-
-    def on_toggle_receive(self):
-        if self.recv_btn.isChecked():
-            self.start_receive()
-        else:
-            self.stop_receive()
-
-    def start_receive(self):
-        self.set_status("Iniciando recepção...")
-        self.recv_btn.setText("Parar Recepção")
-
-        duration = 300
-        mode = self.recv_mode_combo.currentText()
-        sr = self.recv_sr_spin.value()
-
-        self.record_thread = WorkerRecord(duration=duration, mode=mode, sr=sr)
-        self.record_thread.volume.connect(self.update_volume)
-        self.record_thread.finished.connect(self.on_receive_finished)
-        self.record_thread.start()
-
-        self.set_status(f"Recebendo no modo {mode}...")
-
-    def stop_receive(self):
-        self.set_status("Parando recepção...")
-        if self.record_thread:
-            self.record_thread._running = False
-        self.recv_btn.setChecked(False)
-        self.recv_btn.setText("Iniciar Recepção")
-
-    def update_volume(self, level):
-        self.volmeter.setValue(int(level * 100))
-
-    def update_assembly_status(self):
-        try:
-            assemblies = get_assembly_status()
-            if assemblies:
-                status_text = "Montando arquivos:\n"
-                status_parts = []
-
-                for assembly in assemblies:
-                    missing_parts = assembly.get('missing_parts', [])
-                    missing_info = f" - Faltando: {[p + 1 for p in missing_parts]}" if missing_parts else " - Completo!"
-                    progress = f"{assembly['filename']} ({assembly['received']}/{assembly['total']}) {missing_info}"
-                    status_parts.append(progress)
-
-                status_text += "\n".join(status_parts)
-                self.assembly_status.setText(status_text)
-
-                total_assemblies = len(assemblies)
-                self.status_bar.showMessage(f"Montando {total_assemblies} arquivo(s) multi-partes")
-            else:
-                self.assembly_status.setText("Nenhum arquivo multi-partes sendo montado")
-
-            stats = get_reception_stats()
-            if stats['last_reception']:
-                last_time = time.strftime("%H:%M:%S", time.localtime(stats['last_reception']))
-                quality_info = f" | Qualidade média: {stats.get('average_quality', 0):.1f}%" if 'average_quality' in stats else ""
-                self.status_bar.showMessage(
-                    f"Arquivos recebidos: {stats['total_files']} | Última recepção: {last_time}{quality_info}")
-
-        except Exception as e:
-            self.assembly_status.setText(f"Erro no status de montagem: {e}")
-
-    def on_receive_finished(self, saved_files):
-        self.recv_btn.setChecked(False)
-        self.recv_btn.setText("Iniciar Recepção")
-
-        self.update_assembly_status()
-
-        if saved_files:
-            self.set_status(f"Recebido {len(saved_files)} arquivo(s)")
-
-            self.received_files_list.clear()
-            for file_path in saved_files:
-                self.received_files_list.addItem(os.path.basename(file_path))
-
-            assemblies = get_assembly_status()
-            if assemblies:
-                assembly_info = "\n\nArquivos ainda sendo montados:\n"
-                for assembly in assemblies:
-                    assembly_info += f"- {assembly['filename']} ({assembly['received']}/{assembly['total']} partes)\n"
-                saved_msg = "Arquivos recebidos:\n" + "\n".join(
-                    os.path.basename(f) for f in saved_files) + assembly_info
-            else:
-                saved_msg = "Arquivos recebidos:\n" + "\n".join(os.path.basename(f) for f in saved_files)
-
-            QtWidgets.QMessageBox.information(self, "Recepção Concluída", saved_msg)
-        else:
-            self.set_status("Recepção finalizada - nenhum arquivo decodificado")
-
-            assemblies = get_assembly_status()
-            if assemblies:
-                assembly_info = "Arquivos ainda sendo montados:\n"
-                for assembly in assemblies:
-                    assembly_info += f"- {assembly['filename']} ({assembly['received']}/{assembly['total']} partes)\n"
-                QtWidgets.QMessageBox.information(self, "Recepção Concluída",
-                                                  "Nenhum arquivo completo decodificado.\n\n" + assembly_info)
-            else:
-                QtWidgets.QMessageBox.information(self, "Recepção Concluída", "Nenhum arquivo foi decodificado.")
-
-    def on_decode_file(self):
-        wav, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Selecionar WAV para decodificar",
-                                                       filter="Arquivos WAV (*.wav)")
-        if not wav:
-            return
-
-        mode = self.recv_mode_combo.currentText()
-        sr = self.recv_sr_spin.value()
-
-        self.set_status("Decodificando arquivo WAV...")
-        self.progress.setVisible(True)
-        self.progress.setRange(0, 0)
-
-        def job():
-            try:
-                saved = decode_wav_file(wav, mode=mode, symbol_rate=sr)
-                QtCore.QMetaObject.invokeMethod(self, "decode_finished",
-                                                QtCore.Qt.QueuedConnection,
-                                                QtCore.Q_ARG(list, saved))
-            except Exception as e:
-                QtCore.QMetaObject.invokeMethod(self, "decode_error",
-                                                QtCore.Qt.QueuedConnection,
-                                                QtCore.Q_ARG(str, str(e)))
-
-        threading.Thread(target=job, daemon=True).start()
-
-    @QtCore.pyqtSlot(list)
-    def decode_finished(self, saved):
-        self.progress.setVisible(False)
-
-        self.update_assembly_status()
-
-        if saved:
-            self.set_status(f"Decodificado {len(saved)} arquivo(s)")
-
-            for file_path in saved:
-                self.received_files_list.addItem(os.path.basename(file_path))
-
-            msg = "Arquivos decodificados:\n" + "\n".join(os.path.basename(f) for f in saved)
-
-            assemblies = get_assembly_status()
-            if assemblies:
-                assembly_info = "\n\nArquivos ainda sendo montados:\n"
-                for assembly in assemblies:
-                    assembly_info += f"- {assembly['filename']} ({assembly['received']}/{assembly['total']} partes)\n"
-                msg += assembly_info
-
-            QtWidgets.QMessageBox.information(self, "Decodificação Concluída", msg)
-        else:
-            self.set_status("Nenhum arquivo decodificado do WAV")
-
-            assemblies = get_assembly_status()
-            if assemblies:
-                assembly_info = "Arquivos ainda sendo montados:\n"
-                for assembly in assemblies:
-                    assembly_info += f"- {assembly['filename']} ({assembly['received']}/{assembly['total']} partes)\n"
-                QtWidgets.QMessageBox.information(self, "Decodificação Concluída",
-                                                  "Nenhum arquivo completo decodificado.\n\n" + assembly_info)
-            else:
-                QtWidgets.QMessageBox.information(self, "Decodificação Concluída", "Nenhum arquivo foi decodificado.")
-
-    @QtCore.pyqtSlot(str)
-    def decode_error(self, error):
-        self.progress.setVisible(False)
-        self.set_status(f"Erro na decodificação: {error}")
-        QtWidgets.QMessageBox.critical(self, "Erro na Decodificação", f"Erro: {error}")
-
-    def browse_cache_dir(self):
-        global CACHE_DIR
-        new_dir = QtWidgets.QFileDialog.getExistingDirectory(self, "Selecionar Diretório de Cache", CACHE_DIR)
-        if new_dir:
-            CACHE_DIR = new_dir
-            self.cache_dir_edit.setText(CACHE_DIR)
-            os.makedirs(CACHE_DIR, exist_ok=True)
-            self.log_message(f"Diretório de cache alterado para: {CACHE_DIR}")
-
-    def clear_cache(self):
-        try:
-            count = 0
-            for filename in os.listdir(CACHE_DIR):
-                file_path = os.path.join(CACHE_DIR, filename)
-                if os.path.isfile(file_path):
-                    os.remove(file_path)
-                    count += 1
-            self.log_message(f"Cache limpo com sucesso - {count} arquivos removidos")
-            QtWidgets.QMessageBox.information(self, "Cache Limpo", f"{count} arquivos foram removidos do cache.")
-        except Exception as e:
-            self.log_message(f"Erro ao limpar cache: {e}")
-            QtWidgets.QMessageBox.critical(self, "Erro", f"Erro ao limpar cache: {e}")
-
-    def reset_settings(self):
-        self.sr_spin.setValue(9600)
-        self.recv_sr_spin.setValue(9600)
-        self.mode_combo.setCurrentText("FSK9600")
-        self.recv_mode_combo.setCurrentText("FSK9600")
-        self.compress_check.setChecked(True)
-        self.sample_rate_combo.setCurrentText("96000")
-        self.log_message("Configurações restauradas para os padrões")
-        QtWidgets.QMessageBox.information(self, "Configurações Restauradas",
-                                          "Todas as configurações foram restauradas para os valores padrão.")
-
-    def save_log(self):
-        filename, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Salvar Log", "filebeep_log.txt",
-                                                            "Arquivos de Texto (*.txt)")
-        if filename:
-            try:
-                with open(filename, 'w', encoding='utf-8') as f:
-                    f.write(self.log_text.toPlainText())
-                self.log_message(f"Log salvo em: {filename}")
-                QtWidgets.QMessageBox.information(self, "Log Salvo", f"Log salvo com sucesso em:\n{filename}")
-            except Exception as e:
-                self.log_message(f"Erro ao salvar log: {e}")
-                QtWidgets.QMessageBox.critical(self, "Erro", f"Erro ao salvar log: {e}")
-
-    # ===============================================
-    # Métodos do Player de Áudio
-    # ===============================================
-
-    def update_player_ui(self):
-        """Atualiza a interface do player"""
-        # Atualizar barra de progresso
-        progress = self.audio_player.get_progress()
-        self.playback_progress.setValue(int(progress))
-
-        # Atualizar cores dos itens na playlist
-        for i in range(self.playlist_widget.count()):
-            item = self.playlist_widget.item(i)
-            file_path = item.data(QtCore.Qt.UserRole)
-
-            if file_path in self.played_files:
-                # Verde - reprodução concluída
-                item.setBackground(QtGui.QColor(200, 255, 200))
-                item.setForeground(QtGui.QColor(0, 100, 0))
-            elif file_path in self.playing_files:
-                # Amarelo - em reprodução
-                item.setBackground(QtGui.QColor(255, 255, 200))
-                item.setForeground(QtGui.QColor(150, 150, 0))
-            else:
-                # Vermelho - ainda não reproduzido
-                item.setBackground(QtGui.QColor(255, 200, 200))
-                item.setForeground(QtGui.QColor(100, 0, 0))
-
-        # Atualizar informação do arquivo atual
-        if self.audio_player.is_playing and self.audio_player.current_file:
-            current_file = os.path.basename(self.audio_player.current_file)
-            progress_text = f"Reproduzindo: {current_file} ({progress:.1f}%)"
-            self.now_playing_label.setText(progress_text)
-            self.now_playing_label.setStyleSheet("QLabel { color: #006600; font-weight: bold; }")
-        elif self.audio_player.current_file and not self.audio_player.is_playing:
-            current_file = os.path.basename(self.audio_player.current_file)
-            self.now_playing_label.setText(f"Pausado: {current_file}")
-            self.now_playing_label.setStyleSheet("QLabel { color: #666600; font-style: italic; }")
-        else:
-            self.now_playing_label.setText("Nenhum arquivo selecionado")
-            self.now_playing_label.setStyleSheet("QLabel { color: #666; font-style: italic; }")
-
-        # Verificar se a reprodução terminou
-        if self.audio_player.update_playback():
-            if self.audio_player.current_file:
-                self.played_files.add(self.audio_player.current_file)
-                self.playing_files.discard(self.audio_player.current_file)
-
-    def add_file_to_playlist(self, file_path):
-        """Adiciona um arquivo à playlist"""
-        if not os.path.exists(file_path):
-            return
-
-        # Verificar se já existe na playlist
-        for i in range(self.playlist_widget.count()):
-            item = self.playlist_widget.item(i)
-            if item.data(QtCore.Qt.UserRole) == file_path:
-                return
-
-        # Adicionar novo item
-        item = QtWidgets.QListWidgetItem(os.path.basename(file_path))
-        item.setData(QtCore.Qt.UserRole, file_path)
-        self.playlist_widget.addItem(item)
-
-        # Marcar como não reproduzido (vermelho)
-        self.played_files.discard(file_path)
-        self.playing_files.discard(file_path)
-
-    def on_playlist_item_double_click(self, item):
-        """Quando o usuário clica duas vezes em um item da playlist"""
-        file_path = item.data(QtCore.Qt.UserRole)
-        self.play_audio_file(file_path)
-
-    def on_play_selected(self):
-        """Reproduz o arquivo selecionado na playlist"""
-        current_item = self.playlist_widget.currentItem()
-        if current_item:
-            file_path = current_item.data(QtCore.Qt.UserRole)
-            self.play_audio_file(file_path)
-
-    def play_audio_file(self, file_path):
-        """Reproduz um arquivo de áudio"""
-        if self.audio_player.load_file(file_path):
-            self.audio_player.play()
-            self.playing_files.add(file_path)
-            self.played_files.discard(file_path)
-            self.log_message(f"Reproduzindo: {os.path.basename(file_path)}")
-        else:
-            QtWidgets.QMessageBox.warning(self, "Erro",
-                                          f"Não foi possível reproduzir o arquivo: {os.path.basename(file_path)}")
-
-    def on_pause(self):
-        """Pausa a reprodução"""
-        self.audio_player.pause()
-        self.log_message("Reprodução pausada")
-
-    def on_stop(self):
-        """Para a reprodução"""
-        self.audio_player.stop()
-        if self.audio_player.current_file:
-            self.playing_files.discard(self.audio_player.current_file)
-        self.log_message("Reprodução parada")
-
-    def on_clear_playlist(self):
-        """Limpa a playlist"""
-        self.audio_player.stop()
-        self.playlist_widget.clear()
-        self.played_files.clear()
-        self.playing_files.clear()
-        self.log_message("Playlist limpa")
-
-    def closeEvent(self, event):
-        # Parar reprodução de áudio
-        self.audio_player.stop()
-        pygame.mixer.quit()
-
-        if self.record_thread and self.record_thread.isRunning():
-            self.record_thread._running = False
-            self.record_thread.wait(2000)
-
-        if self.encode_worker:
-            self.encode_worker.cancel()
-
-        if self.encode_thread and self.encode_thread.isRunning():
-            self.encode_thread.quit()
-            self.encode_thread.wait(1000)
-
-        self.assembly_timer.stop()
-        self.metrics_timer.stop()
-        self.player_update_timer.stop()
-
-        self.log_message("Aplicação encerrada")
-        event.accept()
-
+# ===============================================
+# INICIALIZAÇÃO DA APLICAÇÃO
+# ===============================================
 if __name__ == "__main__":
-    app = QtWidgets.QApplication(sys.argv)
+    app = QApplication(sys.argv)
     app.setApplicationName("FileBeep Advanced")
-    app.setStyle('Fusion')
+    app.setApplicationVersion("2.0")
+
+    # Configurar fonte padrão
+    font = QFont()
+    font.setFamily("Segoe UI")
+    font.setPointSize(9)
+    app.setFont(font)
 
     win = ModernMainWindow()
     win.show()

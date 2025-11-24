@@ -5,7 +5,7 @@ import struct
 
 
 class ReedSolomonFEC:
-    def __init__(self, nsym=10):
+    def __init__(self, nsym=32):
         self.nsym = nsym  # Símbolos de correção
 
     def encode(self, data: bytes) -> bytes:

@@ -3,8 +3,8 @@ import os, time, math, binascii, struct, hashlib, functools
 from typing import Tuple, List
 from modem import (fsk_modulate, bpsk_modulate, qpsk_modulate,
                    psk8_modulate, fsk_high_speed_modulate, ofdm_modulate_simple,
-                   wav_from_array, SAMPLE_RATE, apsk16_modulate, apsk16_demodulate, dsss_modulate, dsss_demodulate,
-                   msk_modulate, msk_demodulate)
+                   wav_from_array, SAMPLE_RATE, apsk16_modulate, dsss_modulate,
+                   msk_modulate, ft8_modulate, psk31_modulate, feld_hell_modulate)
 from utils.compression import compress_data, prepare_sstv_like, super_compress, delta_compress
 from hellschreiber import hellschreiber_modulate
 from fec import ReedSolomonFEC, ConvolutionalEncoder
@@ -143,158 +143,82 @@ def split_file_for_transmission(file_path: str, mode: str, symbol_rate: int,
 
     parts = []
     total_parts = math.ceil(file_size / part_size)
-
     for i in range(total_parts):
         start = i * part_size
-        end = min((i + 1) * part_size, file_size)
+        end = min(start + part_size, file_size)
         part_data = file_data[start:end]
-        parts.append((fname, part_data, i, total_parts, file_size, file_crc))
+        parts.append((f"{fname}.part{i+1}", part_data, i, total_parts, file_size, file_crc))
 
     return parts
 
 
-def encode_hellschreiber(data_bytes: bytes, baud=122.5, carrier=1000.0, samp_rate=SAMPLE_RATE) -> np.ndarray:
-    """Modulação Hellschreiber para dados de texto a partir de bytes"""
-    try:
-        # Converter bytes para texto
-        text = data_bytes.decode('utf-8', errors='ignore')
-        return hellschreiber_modulate(text, baud, carrier, samp_rate)
-    except Exception as e:
-        print(f"Erro na codificação Hellschreiber: {e}")
-        # Fallback: modulação FSK simples
-        return fsk_modulate(data_bytes, baud=300, mark_freq=800, space_freq=1200, samp_rate=samp_rate)
-
-
-def encode_single_part(part_info, mode, compress, symbol_rate, progress_callback=None, is_cancelled=None):
-    """Encode single file part with enhanced error handling"""
-    fname, part_data, part_num, total_parts, file_size, file_crc = part_info
-
-    if is_cancelled and is_cancelled():
-        raise Exception("Encoding cancelled by user")
-
-    # Compressão adaptativa
-    data = adaptive_compress(part_data, mode) if compress else part_data
-
-    framed = _frame_data(fname, data, part_num, total_parts, file_size, file_crc)
-
-    # Modulation dispatch - CORRIGIDO: usar funções diretamente
-    if mode == "FSK1200":
-        arr = fsk_modulate(framed, baud=1200, mark_freq=1200.0, space_freq=2200.0)
-    elif mode == "FSK9600":
-        arr = fsk_modulate(framed, baud=9600)
-    elif mode == "BPSK":
-        arr = bpsk_modulate(framed, baud=symbol_rate, carrier=3000.0)
-    elif mode == "QPSK":
-        arr = qpsk_modulate(framed, baud=symbol_rate, carrier=3000.0)
-    elif mode == "8PSK":
-        arr = psk8_modulate(framed, baud=symbol_rate, carrier=12000.0)
-    elif mode == "FSK19200":
-        arr = fsk_high_speed_modulate(framed, baud=19200)
-    elif mode == "OFDM4":
-        arr = ofdm_modulate_simple(framed, baud=symbol_rate, carrier=12000.0, num_subcarriers=4)
-    elif mode == "OFDM8":
-        arr = ofdm_modulate_simple(framed, baud=symbol_rate, carrier=12000.0, num_subcarriers=8)
-    elif mode == "APSK16":
-        arr = apsk16_modulate(framed, baud=symbol_rate, carrier=12000.0)
-    elif mode == "DSSS":
-        arr = dsss_modulate(framed, baud=symbol_rate, carrier=3000.0)
-    elif mode == "MSK":
-        arr = msk_modulate(framed, baud=symbol_rate, carrier=6000.0)
-    elif mode == "HELLSCHREIBER":
-        arr = encode_hellschreiber(framed, baud=122.5, carrier=1000.0)
-    else:
-        raise ValueError(f"Modo desconhecido: {mode}")
-
-    wavb = wav_from_array(arr, SAMPLE_RATE)
-
-    outname = os.path.join(CACHE_DIR, f"{fname}.part{part_num + 1:03d}_of_{total_parts:03d}.{mode}.wav")
-
-    with open(outname, 'wb') as wf:
-        wf.write(wavb)
-
-    if progress_callback:
-        progress_callback(part_num + 1, total_parts)
-
-    return outname
-
-
-def encode_hellschreiber_text(text: str, output_path: str = None,
-                             baud=122.5, carrier=1000.0, samp_rate=SAMPLE_RATE) -> str:
-    """Codifica texto em áudio usando Hellschreiber"""
-    modulated = hellschreiber_modulate(text, baud, carrier, samp_rate)
-    wav_data = wav_from_array(modulated, samp_rate)
-
-    if output_path is None:
-        output_path = os.path.join(CACHE_DIR, f"hell_{int(time.time())}.wav")
-
-    with open(output_path, 'wb') as f:
-        f.write(wav_data)
-
-    return output_path
-
-
-def encode_file_with_fec(path: str, mode: str, compress: bool = True,
-                        symbol_rate: int = 9600, fec_type: str = "reed_solomon",
-                        **kwargs) -> str:
-    """Codificação de arquivo com correção de erro integrada"""
-    with open(path, 'rb') as f:
-        data = f.read()
-
-    # Aplicar FEC
-    if fec_type == "reed_solomon":
-        fec = ReedSolomonFEC()
-        data_encoded = fec.encode(data)
-    elif fec_type == "convolutional":
-        fec = ConvolutionalEncoder()
-        data_encoded = fec.encode(data)
-    else:
-        data_encoded = data
-
-    # Criar arquivo temporário com dados codificados
-    temp_path = os.path.join(CACHE_DIR, f"fec_temp_{int(time.time())}.bin")
-    with open(temp_path, 'wb') as f:
-        f.write(data_encoded)
-
-    try:
-        # Codificar normalmente
-        result = encode_file(temp_path, mode, compress, symbol_rate, **kwargs)
-        return result
-    finally:
-        # Limpar arquivo temporário
-        try:
-            os.remove(temp_path)
-        except:
-            pass
-
-
-def encode_file_parts(file_parts: List[tuple], mode: str, compress: bool = True,
-                     symbol_rate: int = 9600, progress_callback=None, is_cancelled=None) -> List[str]:
-    """Encode multiple file parts with enhanced error handling"""
+def encode_file_parts(file_parts: List[tuple], mode: str, compress: bool, symbol_rate: int,
+                      progress_callback=None, is_cancelled=None) -> List[str]:
     encoded_files = []
+    total_parts = len(file_parts)
 
-    for i, part_info in enumerate(file_parts):
+    for idx, (fname, data, part_number, total_parts, file_size, file_crc) in enumerate(file_parts):
         if is_cancelled and is_cancelled():
-            # Cleanup partial files
-            for f in encoded_files:
-                try:
-                    os.remove(f)
-                except:
-                    pass
-            raise Exception("Encoding cancelled by user")
+            raise RuntimeError("Codificação cancelada pelo usuário")
 
-        try:
-            encoded_file = encode_single_part(part_info, mode, compress, symbol_rate, progress_callback, is_cancelled)
-            encoded_files.append(encoded_file)
-        except Exception as e:
-            # Cleanup on error
-            for f in encoded_files:
-                try:
-                    os.remove(f)
-                except:
-                    pass
-            raise e
+        print(f"Codificando parte {idx + 1}/{total_parts}: {fname}")
+
+        if compress:
+            data = adaptive_compress(data, mode)
+
+        framed = _frame_data(fname, data, part_number, total_parts, file_size, file_crc)
+
+        # Modulação
+        if mode == "FSK1200":
+            arr = fsk_modulate(framed, baud=1200, mark_freq=1200.0, space_freq=2200.0)
+        elif mode == "FSK9600":
+            arr = fsk_modulate(framed, baud=9600)
+        elif mode == "BPSK":
+            arr = bpsk_modulate(framed, baud=symbol_rate, carrier=3000.0)
+        elif mode == "QPSK":
+            arr = qpsk_modulate(framed, baud=symbol_rate, carrier=3000.0)
+        elif mode == "8PSK":
+            arr = psk8_modulate(framed, baud=symbol_rate, carrier=12000.0)
+        elif mode == "FSK19200":
+            arr = fsk_high_speed_modulate(framed, baud=19200)
+        elif mode == "OFDM4":
+            arr = ofdm_modulate_simple(framed, baud=symbol_rate, carrier=12000.0, num_subcarriers=4)
+        elif mode == "OFDM8":
+            arr = ofdm_modulate_simple(framed, baud=symbol_rate, carrier=12000.0, num_subcarriers=8)
+        elif mode == "APSK16":
+            arr = apsk16_modulate(framed, baud=symbol_rate, carrier=12000.0)
+        elif mode == "DSSS":
+            arr = dsss_modulate(framed, baud=symbol_rate, carrier=3000.0)
+        elif mode == "MSK":
+            arr = msk_modulate(framed, baud=symbol_rate, carrier=6000.0)
+        elif mode == "HELLSCHREIBER":
+            arr = hellschreiber_modulate(framed.decode('utf-8'))
+        elif mode == "FT8":
+            arr = ft8_modulate(framed, baud=symbol_rate, carrier=3000.0)
+        elif mode == "PSK31":
+            arr = psk31_modulate(framed, baud=symbol_rate, carrier=3000.0)
+        elif mode == "FELD_HELL":
+            arr = feld_hell_modulate(framed, baud=122.5, carrier=1000.0)
+        else:
+            raise ValueError(f"Modo desconhecido: {mode}")
+
+        wavb = wav_from_array(arr, SAMPLE_RATE)
+        outname = os.path.join(CACHE_DIR, f"{fname}.{mode}.sr{symbol_rate}.wav")
+
+        with open(outname, 'wb') as wf:
+            wf.write(wavb)
+
+        encoded_files.append(outname)
+
+        if progress_callback:
+            progress_callback(idx + 1, total_parts)
 
     return encoded_files
+
+
+def encode_hellschreiber_text(text: str):
+    # Implementação simplificada
+    return "hellschreiber.wav"  # Placeholder
 
 
 def encode_file(path: str, mode: str = "FSK9600", compress: bool = True,
@@ -398,7 +322,13 @@ def encode_file(path: str, mode: str = "FSK9600", compress: bool = True,
         elif mode == "MSK":
             arr = msk_modulate(framed, baud=symbol_rate, carrier=6000.0)
         elif mode == "HELLSCHREIBER":
-            arr = encode_hellschreiber(framed, baud=122.5, carrier=1000.0)
+            arr = hellschreiber_modulate(framed.decode('utf-8'))
+        elif mode == "FT8":
+            arr = ft8_modulate(framed, baud=symbol_rate, carrier=3000.0)
+        elif mode == "PSK31":
+            arr = psk31_modulate(framed, baud=symbol_rate, carrier=3000.0)
+        elif mode == "FELD_HELL":
+            arr = feld_hell_modulate(framed, baud=122.5, carrier=1000.0)
         else:
             raise ValueError(f"Modo desconhecido: {mode}")
 

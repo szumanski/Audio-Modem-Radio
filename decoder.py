@@ -10,7 +10,7 @@ import joblib
 
 from modem import (fsk_demodulate, bpsk_demodulate, qpsk_demodulate,
                    psk8_demodulate, fsk_high_speed_demodulate, ofdm_demodulate_simple,
-                   SAMPLE_RATE)
+                   SAMPLE_RATE, ft8_demodulate, psk31_demodulate, feld_hell_demodulate)
 from utils.compression import decompress_data, super_decompress, delta_decompress
 
 
@@ -158,47 +158,10 @@ class MLSignalProcessor:
 class AdvancedFileAssembly(FileAssembly):
     def __init__(self, filename: str, total_parts: int, file_size: int, file_crc: int):
         super().__init__(filename, total_parts, file_size, file_crc)
-        self.ml_processor = MLSignalProcessor()
-        self.reception_timestamps = []
-        self.signal_quality_history = []
-
-    def calculate_signal_quality_ml(self, data: bytes, full_signal: np.ndarray = None) -> float:
-        """Calcula qualidade do sinal usando machine learning"""
-        base_quality = self.calculate_signal_quality(data)
-
-        if full_signal is not None and len(full_signal) > 100:
-            anomaly_score = self.ml_processor.detect_anomalies(full_signal)
-            # Combinar qualidade base com score de anomalia
-            ml_quality = base_quality * (1.0 - anomaly_score * 0.5)
-            return max(0.0, min(1.0, ml_quality))
-
-        return base_quality
-
-    def add_part_with_ml(self, part_number: int, data: bytes,
-                         signal_quality: float = None,
-                         raw_signal: np.ndarray = None) -> bool:
-        """Adiciona parte com análise ML avançada"""
-        if raw_signal is not None and signal_quality is None:
-            signal_quality = self.calculate_signal_quality_ml(data, raw_signal)
-
-        self.reception_timestamps.append(time.time())
-        self.signal_quality_history.append(signal_quality)
-
-        return self.add_part(part_number, data, signal_quality)
+        # Adicione funcionalidades avançadas aqui
 
 
-# Diretório de recepção com organização por data
-def get_received_dir():
-    date_str = datetime.now().strftime("%Y-%m-%d")
-    recv_dir = os.path.join("received", date_str)
-    os.makedirs(recv_dir, exist_ok=True)
-    return recv_dir
-
-
-RECV_DIR = get_received_dir()
-
-# Sistema global para rastrear arquivos multi-partes
-file_assemblies = {}  # Mudado de defaultdict(dict) para dict normal
+file_assemblies = {}
 reception_stats = {
     'total_files': 0,
     'total_bytes': 0,
@@ -207,251 +170,99 @@ reception_stats = {
     'average_quality': 0.0,
     'duplicates_rejected': 0,
     'parts_reordered': 0,
-    'total_quality': 0.0,  # Adicionado
-    'quality_samples': 0  # Adicionado
+    'total_quality': 0.0,
+    'quality_samples': 0
 }
 
+RECV_DIR = "recv"
+os.makedirs(RECV_DIR, exist_ok=True)
 
-def parse_fbp_stream_enhanced(b: bytes):
-    """Parser melhorado com diagnóstico detalhado"""
+
+def parse_fbp_stream_enhanced(raw: bytes) -> list:
+    parsed = []
     i = 0
-    res = []
-    L = len(b)
-    frames_found = 0
-    errors = 0
-
-    print(f"🔍 Iniciando parsing de {L} bytes...")
-
-    while i < L - 25:
-        idx = b.find(b'\xAA\xAA\xAA\xAAFBPC', i)
-        if idx == -1:
-            if frames_found == 0 and L > 50:
-                print(f"Primeiros 50 bytes: {b[:50].hex()}")
-            break
-
-        print(f"✅ Preamble encontrado na posição {idx}")
-
-        try:
-            j = idx + 8
-            if j >= L:
-                break
-
-            fname_len = b[j]
-            j += 1
-            print(f"📁 Tamanho do nome do arquivo: {fname_len}")
-
-            if j + fname_len > L:
-                i = idx + 1
-                continue
-
-            fname = b[j:j + fname_len].decode('utf-8', errors='ignore')
-            j += fname_len
-            print(f"📄 Nome do arquivo: {fname}")
-
-            if j + 25 > L:
-                i = idx + 1
-                continue
-
-            part_number = struct.unpack('<I', b[j:j + 4])[0]
-            total_parts = struct.unpack('<I', b[j + 4:j + 8])[0]
-            file_size = struct.unpack('<I', b[j + 8:j + 12])[0]
-            file_crc = struct.unpack('<I', b[j + 12:j + 16])[0]
-            part_size = struct.unpack('<I', b[j + 16:j + 20])[0]
-            part_crc = struct.unpack('<I', b[j + 20:j + 24])[0]
-            quality_byte = b[j + 24]
-            signal_quality = quality_byte / 255.0
-
-            j += 25
-            print(f"🔢 Part {part_number + 1}/{total_parts}, Tamanho: {part_size} bytes")
-
-            if j + part_size > L:
-                i = idx + 1
-                continue
-
-            payload = b[j:j + part_size]
-
-            calculated_crc = binascii.crc32(payload) & 0xffffffff
-            if calculated_crc == part_crc:
-                print(f"✅ CRC válido para parte {part_number + 1}")
-                res.append((fname, payload, part_number, total_parts, file_size, file_crc, signal_quality))
-                frames_found += 1
-                i = j + part_size
-            else:
-                print(f"❌ CRC inválido: esperado {part_crc:08X}, calculado {calculated_crc:08X}")
-                i = idx + 1
-
-        except Exception as e:
-            print(f"❌ Erro no parsing do frame: {e}")
-            i = idx + 1
-
-    print(f"📊 Frames encontrados: {frames_found}, Erros: {errors}")
-    return res
+    while i < len(raw):
+        if raw[i:i+4] == b'\xAA\xAA\xAA\xAA' and raw[i+4:i+8] == b'FBPC':
+            fname_len = raw[i+8]
+            fname = raw[i+9:i+9+fname_len].decode('utf-8')
+            offset = i + 9 + fname_len
+            part_number, total_parts, file_size, file_crc, part_size, part_crc, quality_byte = struct.unpack('<IIIIIIB', raw[offset:offset+25])
+            payload = raw[offset+25:offset+25+part_size]
+            if binascii.crc32(payload) == part_crc:
+                is_multi = total_parts > 1
+                parsed.append((fname, payload, is_multi, part_number, total_parts, file_size, file_crc))
+            i = offset + 25 + part_size
+        else:
+            i += 1
+    return parsed
 
 
-def parse_fbp_stream_ml_enhanced(b: bytes, raw_signal: np.ndarray = None):
-    """Parser com machine learning para melhor detecção"""
-    ml_processor = MLSignalProcessor()
-    parsed_frames = parse_fbp_stream_enhanced(b)
-
-    # Analisar qualidade dos frames com ML se sinal bruto disponível
-    if raw_signal is not None:
-        for i, frame in enumerate(parsed_frames):
-            fname, payload, part_number, total_parts, file_size, file_crc, signal_quality = frame
-            anomaly_score = ml_processor.detect_anomalies(raw_signal)
-            adjusted_quality = signal_quality * (1.0 - anomaly_score * 0.3)
-            parsed_frames[i] = (fname, payload, part_number, total_parts,
-                                file_size, file_crc, adjusted_quality)
-
-    return parsed_frames
-
-
-def calculate_payload_quality(payload: bytes, full_frame: bytes) -> float:
+def smart_decompress(compressed_data: bytes) -> bytes:
     try:
-        quality_metrics = []
-
-        if len(payload) > 0:
-            non_null = sum(1 for byte in payload if byte != 0)
-            data_ratio = non_null / len(payload)
-            quality_metrics.append(data_ratio)
-
-        if len(full_frame) > 20:
-            preamble_quality = 1.0 if full_frame[:8] == b'\xAA\xAA\xAA\xAAFBPC' else 0.5
-            quality_metrics.append(preamble_quality)
-
-        expected_size = struct.unpack('<I', full_frame[16:20])[0] if len(full_frame) >= 20 else 0
-        actual_size = len(payload)
-        size_match = 1.0 if expected_size == actual_size else 0.5
-        quality_metrics.append(size_match)
-
-        return sum(quality_metrics) / len(quality_metrics) if quality_metrics else 0.5
-
-    except Exception:
-        return 0.5
-
-
-def smart_decompress(payload: bytes) -> bytes:
-    """
-    Descompressão inteligente com a ordem de operações corrigida.
-    Primeiro desfaz o delta, depois o super_decompress.
-    """
-    try:
-        # Passo 1: Tenta reverter a compressão delta primeiro.
-        # É seguro aplicar mesmo que não tenha sido usado, pois o impacto é mínimo em dados não-delta.
-        try:
-            payload_after_delta = delta_decompress(payload)
-        except Exception:
-            # Se a descompressão delta falhar, usa o payload original
-            payload_after_delta = payload
-
-        # Passo 2: Agora, com os prefixos restaurados, faz a super descompressão.
-        if payload_after_delta.startswith((b'LZMA', b'ZLIB', b'RAW')):
-            return super_decompress(payload_after_delta)
-
-        # Passo 3: Se não for um formato super_compress, tenta zlib padrão.
-        # Isso cobre os modos de baixa velocidade e casos onde a compressão delta não foi aplicada.
-        # Usamos o payload original aqui, pois a compressão delta não se aplicaria.
-        return decompress_data(payload)
-
+        if compressed_data.startswith(b'LZMA'):
+            return lzma.decompress(compressed_data[4:])
+        elif compressed_data.startswith(b'DLZM'):
+            lzma_decompressed = lzma.decompress(compressed_data[4:])
+            return delta_decompress(lzma_decompressed)
+        elif compressed_data.startswith(b'ZLIB'):
+            return zlib.decompress(compressed_data[4:])
+        elif compressed_data.startswith(b'RAW'):
+            return compressed_data[4:]
+        else:
+            try:
+                return zlib.decompress(compressed_data)
+            except:
+                return compressed_data
     except Exception as e:
-        print(f"Erro severo na descompressão, retornando dados brutos: {e}")
-        # Como último recurso, retorna o payload original.
-        return payload
+        print(f"⚠️ Erro na descompressão inteligente: {e}")
+        return compressed_data
 
 
-def save_decoded_files(parsed):
+def save_decoded_files(parsed: list) -> list:
     saved = []
-    global reception_stats
-
-    for fname, payload, part_number, total_parts, file_size, file_crc, signal_quality in parsed:
-        # Atualizar métricas de qualidade
-        reception_stats['total_quality'] += signal_quality
-        reception_stats['quality_samples'] += 1
-        reception_stats['average_quality'] = (reception_stats['total_quality'] / reception_stats[
-            'quality_samples']) * 100
-
-        if total_parts > 1:
-            assembly_key = f"{os.path.basename(fname).lower()}_{file_crc:08x}"
-
+    for fname, payload, is_multi, part_number, total_parts, file_size, file_crc in parsed:
+        if is_multi:
+            assembly_key = f"{fname}_{file_crc}"
             if assembly_key not in file_assemblies:
-                file_assemblies[assembly_key] = FileAssembly(fname, total_parts, file_size, file_crc)
-                print(f"Iniciando montagem do arquivo: {fname} ({total_parts} partes)")
-
+                file_assemblies[assembly_key] = AdvancedFileAssembly(fname, total_parts, file_size, file_crc)
             assembly = file_assemblies[assembly_key]
-            is_complete = assembly.add_part(part_number, payload, signal_quality)
-
-            progress = assembly.get_progress()
-            missing = assembly.get_missing_parts()
-
-            print(
-                f"Parte {part_number + 1}/{total_parts} de {fname} recebida ({assembly.received_parts}/{total_parts} completo, {progress:.1f}%)")
-
-            if missing:
-                print(f"Partes faltantes de {fname}: {[p + 1 for p in missing]}")
-            else:
-                print(f"Todas as partes de {fname} recebidas!")
-
-            if is_complete:
+            if assembly.add_part(part_number, payload):
                 try:
-                    print("Todas as partes recebidas. Descomprimindo cada parte individualmente...")
-
-                    # 1. Descomprime cada parte da lista e armazena os resultados.
-                    decompressed_parts = [smart_decompress(part) for part in assembly.parts]
-
-                    # 2. Junta os dados já descomprimidos para formar o arquivo final.
-                    final_data = b''.join(decompressed_parts)
-
-                    # 3. Agora, a verificação final de tamanho e CRC fará sentido.
-                    final_size = len(final_data)
+                    final_data = assembly.assemble_file()
                     final_crc = binascii.crc32(final_data) & 0xffffffff
-
+                    final_size = len(final_data)
                     if final_size != assembly.file_size:
-                        print(
-                            f"ALERTA FINAL: Tamanho do arquivo montado não corresponde! Esperado: {assembly.file_size}, Obtido: {final_size}")
-
+                        print(f"ALERTA: Tamanho do arquivo montado não corresponde! Esperado: {assembly.file_size}, Obtido: {final_size}")
                     if final_crc != assembly.expected_crc:
-                        print(
-                            f"ALERTA FINAL: CRC do arquivo montado não corresponde! Esperado: {assembly.expected_crc:08X}, Obtido: {final_crc:08X}")
-
-                    timestamp = int(time.time())
-
+                        print(f"ALERTA FINAL: CRC do arquivo montado não corresponde! Esperado: {assembly.expected_crc:08X}, Obtido: {final_crc:08X}")
                     timestamp = int(time.time())
                     safe_filename = "".join(c for c in fname if c.isalnum() or c in (' ', '-', '_', '.'))
                     outpath = os.path.join(RECV_DIR, f"recv_{timestamp}_{safe_filename}")
-
                     with open(outpath, 'wb') as f:
                         f.write(final_data)
-
                     saved.append(outpath)
                     reception_stats['total_files'] += 1
                     reception_stats['total_bytes'] += len(final_data)
                     reception_stats['last_reception'] = time.time()
-
                     quality_report = assembly.get_quality_report()
                     print(f"Arquivo multi-partes montado com sucesso: {fname}")
                     print(f"Relatório de qualidade: {quality_report}")
-
                     del file_assemblies[assembly_key]
-
                 except Exception as e:
                     print(f"Erro ao montar arquivo {fname}: {e}")
-
             continue
 
         try:
             final_data = smart_decompress(payload)
-
             timestamp = int(time.time())
             safe_filename = "".join(c for c in fname if c.isalnum() or c in (' ', '-', '_', '.'))
             outpath = os.path.join(RECV_DIR, f"recv_{timestamp}_{safe_filename}")
-
             with open(outpath, 'wb') as f:
                 f.write(final_data)
-
             saved.append(outpath)
             reception_stats['total_files'] += 1
             reception_stats['total_bytes'] += len(final_data)
             reception_stats['last_reception'] = time.time()
-
         except Exception as e:
             print(f"Erro ao salvar arquivo {fname}: {e}")
 
@@ -464,8 +275,7 @@ def save_decoded_files(parsed):
 
     for key in expired_keys:
         assembly = file_assemblies[key]
-        print(
-            f"Removendo arquivo incompleto expirado: {assembly.filename} ({assembly.received_parts}/{assembly.total_parts} partes)")
+        print(f"Removendo arquivo incompleto expirado: {assembly.filename} ({assembly.received_parts}/{assembly.total_parts} partes)")
         del file_assemblies[key]
 
     if parsed:
@@ -488,6 +298,9 @@ def decode_with_retry(data: np.ndarray, mode: str, symbol_rate: int, max_retries
                 "FSK19200": lambda: fsk_high_speed_demodulate(data, baud=19200),
                 "OFDM4": lambda: ofdm_demodulate_simple(data, baud=symbol_rate, carrier=12000.0, num_subcarriers=4),
                 "OFDM8": lambda: ofdm_demodulate_simple(data, baud=symbol_rate, carrier=12000.0, num_subcarriers=8),
+                "FT8": lambda: ft8_demodulate(data, baud=symbol_rate, carrier=3000.0),
+                "PSK31": lambda: psk31_demodulate(data, baud=symbol_rate, carrier=3000.0),
+                "FELD_HELL": lambda: feld_hell_demodulate(data, baud=122.5, carrier=1000.0),
             }
 
             if mode not in demodulation_map:
