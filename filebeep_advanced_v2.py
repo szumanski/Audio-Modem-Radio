@@ -5,7 +5,7 @@ import tempfile
 import time
 import threading
 from datetime import datetime
-
+from ptt import ptt_controller
 import pygame
 from PyQt5 import QtWidgets, QtCore, QtGui
 import sounddevice as sd
@@ -686,6 +686,7 @@ class ModernMainWindow(QMainWindow):
         left_layout.addLayout(action_layout)
         left_layout.addStretch()
 
+
         # Painel direito - Visualização
         right_panel = QWidget()
         right_layout = QVBoxLayout(right_panel)
@@ -786,6 +787,56 @@ class ModernMainWindow(QMainWindow):
 
         self.tabs.addTab(decode_tab, "🔍 Decodificação")
 
+    def create_ptt_controls(self):
+        """Cria o grupo de controle de Hardware/PTT"""
+        ptt_group = QGroupBox("📻 Controle de Rádio (PTT)")
+        ptt_layout = QHBoxLayout(ptt_group)
+
+        # Combo de Portas
+        ptt_layout.addWidget(QLabel("Porta COM:"))
+        self.port_combo = QComboBox()
+        self.port_combo.addItem("Nenhuma")
+        self.port_combo.addItems(ptt_controller.get_available_ports())
+        ptt_layout.addWidget(self.port_combo)
+
+        # Botão de Atualizar Portas
+        self.refresh_ports_btn = QPushButton("🔄")
+        self.refresh_ports_btn.setMaximumWidth(40)
+        self.refresh_ports_btn.clicked.connect(self.refresh_com_ports)
+        ptt_layout.addWidget(self.refresh_ports_btn)
+
+        # Seleção do Método (RTS/DTR)
+        ptt_layout.addWidget(QLabel("Sinal:"))
+        self.ptt_method_combo = QComboBox()
+        self.ptt_method_combo.addItems(["RTS", "DTR"])
+        ptt_layout.addWidget(self.ptt_method_combo)
+
+        # Botão de Teste
+        self.test_ptt_btn = QPushButton("Testar PTT")
+        self.test_ptt_btn.clicked.connect(self.test_ptt)
+        ptt_layout.addWidget(self.test_ptt_btn)
+
+        return ptt_group
+
+    def refresh_com_ports(self):
+        self.port_combo.clear()
+        self.port_combo.addItem("Nenhuma")
+        self.port_combo.addItems(ptt_controller.get_available_ports())
+
+    def test_ptt(self):
+        """Testa o PTT por 1 segundo"""
+        port = self.port_combo.currentText()
+        method = self.ptt_method_combo.currentText()
+
+        if port == "Nenhuma":
+            QMessageBox.warning(self, "Aviso", "Selecione uma porta COM primeiro.")
+            return
+
+        ptt_controller.connect(port, method)
+        ptt_controller.ptt_on()
+        # Usa QTimer para desligar após 1s sem travar a GUI
+        QTimer.singleShot(1000, ptt_controller.ptt_off)
+
     def create_player_tab(self):
         """Cria a aba do player"""
         player_tab = QWidget()
@@ -798,6 +849,8 @@ class ModernMainWindow(QMainWindow):
         self.playlist_widget.itemDoubleClicked.connect(self.on_playlist_item_double_click)
         playlist_layout.addWidget(self.playlist_widget)
         layout.addWidget(playlist_group)
+
+        layout.addWidget(self.create_ptt_controls())
 
         # Controles do player
         controls_group = QGroupBox("🎛️ Controles de Reprodução")
@@ -1126,6 +1179,9 @@ class ModernMainWindow(QMainWindow):
 
         # Verificar se a reprodução terminou
         if self.audio_player.update_playback():
+            # A música acabou, DESLIGAR O PTT
+            ptt_controller.ptt_off()  # <-- DESLIGA O RÁDIO
+
             if self.audio_player.current_file:
                 self.played_files.add(self.audio_player.current_file)
                 self.playing_files.discard(self.audio_player.current_file)
@@ -1167,14 +1223,25 @@ class ModernMainWindow(QMainWindow):
             QMessageBox.warning(self, "Atenção", "Por favor, selecione um arquivo da playlist primeiro.")
 
     def play_audio_file(self, file_path):
-        """Reproduz um arquivo de áudio"""
+        """Reproduz um arquivo de áudio COM PTT"""
+        # Configurar PTT antes de tocar
+        port = self.port_combo.currentText()
+        method = self.ptt_method_combo.currentText()
+
+        if port != "Nenhuma":
+            ptt_controller.connect(port, method)
+            ptt_controller.ptt_on()  # <-- LIGA O RÁDIO
+            self.log_message(f"📻 Transmitindo via {port} ({method})...")
+
         if self.audio_player.load_file(file_path):
             self.audio_player.play()
             self.playing_files.add(file_path)
             self.played_files.discard(file_path)
             self.log_message(f"🎵 Reproduzindo: {os.path.basename(file_path)}")
         else:
-            QMessageBox.warning(self, "Erro", f"Não foi possível reproduzir o arquivo: {os.path.basename(file_path)}")
+            ptt_controller.ptt_off()  # Desliga se falhar
+            QMessageBox.warning(self, "Erro", f"Não foi possível reproduzir: {os.path.basename(file_path)}")
+
 
     def on_pause(self):
         """Pausa a reprodução"""
@@ -1184,6 +1251,7 @@ class ModernMainWindow(QMainWindow):
     def on_stop(self):
         """Para a reprodução"""
         self.audio_player.stop()
+        ptt_controller.ptt_off() # <-- GARANTIA DE SEGURANÇA
         if self.audio_player.current_file:
             self.playing_files.discard(self.audio_player.current_file)
         self.log_message("⏹️ Reprodução parada")

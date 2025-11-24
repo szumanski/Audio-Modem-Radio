@@ -1,12 +1,21 @@
 # -*- mode: python ; coding: utf-8 -*-
+from PyInstaller.utils.hooks import collect_all
+
+datas = []
+binaries = []
+hiddenimports = ['serial', 'sklearn.utils._cython_blas', 'sklearn.neighbors.typedefs', 'sklearn.neighbors.quad_tree', 'sklearn.tree', 'sklearn.ensemble']
+tmp_ret = collect_all('sklearn')
+datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+tmp_ret = collect_all('scipy')
+datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 
 
 a = Analysis(
     ['filebeep_advanced_v2.py'],
     pathex=[],
-    binaries=[],
-    datas=[('encoder.py', '.'), ('decoder.py', '.'), ('modem.py', '.'), ('utils/compression.py', '.'), ('hellschreiber.py', '.'), ('fec.py', '.'), ('config.py', '.')],
-    hiddenimports=['pygame', 'PyQt5', 'PyQt5.QtCore', 'PyQt5.QtWidgets', 'PyQt5.QtGui', 'sounddevice', 'soundfile', 'numpy', 'scipy', 'scipy.signal', 'scipy.fft', 'sklearn', 'sklearn.ensemble', 'sklearn.tree', 'sklearn.base', 'psutil', 'pyqtgraph', 'threading', 'struct', 'binascii', 'hashlib', 'math', 'time', 'os', 'sys'],
+    binaries=binaries,
+    datas=datas,
+    hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
