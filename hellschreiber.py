@@ -1,7 +1,9 @@
 # hellschreiber.py - Sistema completo de transmissão de texto estilo fac-símile
 import numpy as np
 import math
-from modem import SAMPLE_RATE
+
+# Definir SAMPLE_RATE localmente para evitar importação circular
+SAMPLE_RATE = 96000
 
 # Mapeamento completo de caracteres ASCII para padrões 7x7
 CHAR_MAP = {
@@ -124,11 +126,11 @@ def hellschreiber_modulate(text: str, baud=122.5, carrier=1000.0, samp_rate=SAMP
             # Caractere não suportado, usar espaço
             pixels.extend([0] * (7 * 7 + 2))
 
-    # Adicionar finalização
+        # Adicionar finalização
     for _ in range(5):  # 5 linhas de finalização
         pixels.extend([1, 1, 1, 1, 1, 1, 1])
 
-    # Converter pixels em forma de onda
+        # Converter pixels em forma de onda
     samples_per_pixel = int(round(samp_rate / baud))
     total_samples = samples_per_pixel * len(pixels)
     out = np.zeros(total_samples, dtype=np.float32)

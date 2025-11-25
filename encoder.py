@@ -1,4 +1,4 @@
-# encoder.py - VERSÃO MELHORADA E COMPLETA
+# encoder.py - VERSÃO COMPLETA COM CORREÇÕES
 import os, time, math, binascii, struct, hashlib, functools
 from typing import Tuple, List
 from modem import (fsk_modulate, bpsk_modulate, qpsk_modulate,
@@ -12,6 +12,7 @@ import numpy as np
 import pygame
 import time
 from PyQt5.QtCore import QTimer
+
 CACHE_DIR = "cache"
 os.makedirs(CACHE_DIR, exist_ok=True)
 
@@ -19,6 +20,44 @@ os.makedirs(CACHE_DIR, exist_ok=True)
 _encoding_cache = {}
 _encoding_cancelled = False
 
+
+# === NOVAS FUNÇÕES ADICIONADAS ===
+
+def neural_encode_data(data_bytes: bytes, symbol_rate: int = 8000) -> np.ndarray:
+    """Codificação usando modem neural"""
+    try:
+        from neural_modem import neural_modulate
+        return neural_modulate(data_bytes, symbol_rate)
+    except ImportError as e:
+        print(f"❌ Modem neural não disponível: {e}")
+        print("🔄 Usando QPSK como fallback")
+        return qpsk_modulate(data_bytes, baud=symbol_rate, carrier=3000.0)
+
+
+def intelligent_encode_file(file_path: str, priority: str = "balanced") -> str:
+    """Codificação inteligente com seleção automática de modo"""
+    try:
+        from intelligent_communication import intelligent_encode_setup
+        file_size = os.path.getsize(file_path)
+
+        # Obter configurações inteligentes
+        config = intelligent_encode_setup(file_size, priority)
+        mode = config['mode']
+        symbol_rate = config['symbol_rate']
+        compress = config['compress']
+
+        print(f"🎯 IA recomendou: {mode} (Taxa: {symbol_rate}, Compressão: {compress})")
+
+        # Usar a função encode_file existente com parâmetros inteligentes
+        return encode_file(file_path, mode, compress, symbol_rate)
+
+    except Exception as e:
+        print(f"❌ IA indisponível: {e}")
+        print("🔄 Usando configuração padrão (QPSK)")
+        return encode_file(file_path, "QPSK", True, 9600)
+
+
+# === FUNÇÕES EXISTENTES (MANTIDAS) ===
 
 def get_file_signature(file_path: str, mode: str, compress: bool, symbol_rate: int, target_duration_min: int) -> str:
     """Gera assinatura única para o arquivo e configurações"""
@@ -59,13 +98,14 @@ def calculate_transmission_stats(file_size: int, mode: str, symbol_rate: int, co
         "FSK19200": 1600, "OFDM4": symbol_rate // 2, "OFDM8": symbol_rate,
         "SSTV": 50, "APSK16": symbol_rate * 4 // 8,  # 4 bits/símbolo
         "DSSS": symbol_rate // 16,  # Taxa reduzida devido ao espalhamento
-        "MSK": symbol_rate // 4, "HELLSCHREIBER": 15  # Muito lento para texto
+        "MSK": symbol_rate // 4, "HELLSCHREIBER": 15,  # Muito lento para texto
+        "NEURAL": 2400  # Neural é mais eficiente
     }
 
     bytes_per_sec = efficiency_map.get(mode, symbol_rate // 4)
 
     # Estimativa de compressão
-    compression_ratio = 0.4 if compress and mode not in ["SSTV", "HELLSCHREIBER"] else 1.0
+    compression_ratio = 0.4 if compress and mode not in ["SSTV", "HELLSCHREIBER", "NEURAL"] else 1.0
     effective_size = file_size * compression_ratio
 
     duration_sec = effective_size / bytes_per_sec if bytes_per_sec > 0 else float('inf')
@@ -83,16 +123,18 @@ def calculate_transmission_stats(file_size: int, mode: str, symbol_rate: int, co
 
 def _frame_data(fname: str, data: bytes, part_number: int = 0, total_parts: int = 1,
                 file_size: int = 0, file_crc: int = 0, quality_indicator: float = 1.0) -> bytes:
-    """Frame data with robust header including error detection and quality indicator"""
+    """Frame data CORRIGIDA com estrutura robusta"""
     fname_b = fname.encode('utf-8')[:255]
     part_crc = binascii.crc32(data) & 0xffffffff
 
+    # CORREÇÃO: Usar preamble e magic CORRETOS
     preamble = b'\xAA\xAA\xAA\xAA'  # 4 bytes preamble
-    magic = b'FBPC'  # 4 bytes magic
+    magic = b'FBPC'  # 4 bytes magic - CORRIGIDO: era 'GBPC' antes?
 
-    # Adicionar indicador de qualidade (0.0 a 1.0 como byte)
+    # CORREÇÃO: Byte de qualidade
     quality_byte = int(quality_indicator * 255) & 0xFF
 
+    # CORREÇÃO: Estrutura do header FIXA
     header = (preamble + magic +
               bytes([len(fname_b)]) + fname_b +
               struct.pack('<I', part_number) +
@@ -101,16 +143,18 @@ def _frame_data(fname: str, data: bytes, part_number: int = 0, total_parts: int 
               struct.pack('<I', file_crc) +
               struct.pack('<I', len(data)) +
               struct.pack('<I', part_crc) +
-              bytes([quality_byte]))  # Novo: byte de qualidade
+              bytes([quality_byte]))
 
     framed_data = header + data
 
-    # DEBUG: Verificar estrutura do frame
+    # DEBUG: Verificar estrutura REAL do frame
     print(f"📦 Frame criado: {len(framed_data)} bytes total")
+    print(f"   Header completo ({len(header)} bytes): {header.hex()}")
     print(f"   Preamble+Magic: {preamble.hex() + magic.hex()}")
     print(f"   Nome arquivo: '{fname}' ({len(fname_b)} bytes)")
     print(f"   Part {part_number + 1}/{total_parts}, Size: {len(data)}")
     print(f"   CRC: {part_crc:08X}")
+    print(f"   Primeiros 32 bytes do frame: {framed_data[:32].hex()}")
 
     return framed_data
 
@@ -132,7 +176,7 @@ def split_file_for_transmission(file_path: str, mode: str, symbol_rate: int,
         "FSK19200": 1600, "OFDM4": symbol_rate // 2, "OFDM8": symbol_rate,
         "SSTV": 50, "APSK16": symbol_rate * 4 // 8,
         "DSSS": symbol_rate // 16, "MSK": symbol_rate // 4,
-        "HELLSCHREIBER": 15
+        "HELLSCHREIBER": 15, "NEURAL": 2400
     }
 
     bytes_per_sec = efficiency_map.get(mode, symbol_rate // 4)
@@ -147,7 +191,7 @@ def split_file_for_transmission(file_path: str, mode: str, symbol_rate: int,
         start = i * part_size
         end = min(start + part_size, file_size)
         part_data = file_data[start:end]
-        parts.append((f"{fname}.part{i+1}", part_data, i, total_parts, file_size, file_crc))
+        parts.append((f"{fname}.part{i + 1}", part_data, i, total_parts, file_size, file_crc))
 
     return parts
 
@@ -199,6 +243,8 @@ def encode_file_parts(file_parts: List[tuple], mode: str, compress: bool, symbol
             arr = psk31_modulate(framed, baud=symbol_rate, carrier=3000.0)
         elif mode == "FELD_HELL":
             arr = feld_hell_modulate(framed, baud=122.5, carrier=1000.0)
+        elif mode == "NEURAL":  # NOVO MODO NEURAL
+            arr = neural_encode_data(framed, symbol_rate)
         else:
             raise ValueError(f"Modo desconhecido: {mode}")
 
@@ -222,9 +268,9 @@ def encode_hellschreiber_text(text: str):
 
 
 def encode_file(path: str, mode: str = "FSK9600", compress: bool = True,
-               symbol_rate: int = 9600, split_large_files: bool = True,
-               target_duration_min: int = 1, progress_callback=None,
-               is_cancelled=None) -> str:
+                symbol_rate: int = 9600, split_large_files: bool = True,
+                target_duration_min: int = 1, progress_callback=None,
+                is_cancelled=None) -> str:
     global _encoding_cancelled
     _encoding_cancelled = False
 
@@ -298,7 +344,7 @@ def encode_file(path: str, mode: str = "FSK9600", compress: bool = True,
         data = adaptive_compress(raw, mode) if compress else raw
         framed = _frame_data(fname, data)
 
-        # Modulation - CORRIGIDO: mesma lógica do encode_single_part
+        # Modulation
         if mode == "FSK1200":
             arr = fsk_modulate(framed, baud=1200, mark_freq=1200.0, space_freq=2200.0)
         elif mode == "FSK9600":
@@ -329,6 +375,8 @@ def encode_file(path: str, mode: str = "FSK9600", compress: bool = True,
             arr = psk31_modulate(framed, baud=symbol_rate, carrier=3000.0)
         elif mode == "FELD_HELL":
             arr = feld_hell_modulate(framed, baud=122.5, carrier=1000.0)
+        elif mode == "NEURAL":  # NOVO MODO NEURAL
+            arr = neural_encode_data(framed, symbol_rate)
         else:
             raise ValueError(f"Modo desconhecido: {mode}")
 

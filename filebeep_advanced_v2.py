@@ -66,7 +66,7 @@ os.makedirs(CACHE_DIR, exist_ok=True)
 # CONSTANTES E CONFIGURAÇÕES DE UI
 # ===============================================
 MODES = ["FSK1200", "FSK9600", "BPSK", "QPSK", "SSTV", "8PSK", "FSK19200",
-         "OFDM4", "OFDM8", "APSK16", "DSSS", "MSK", "HELLSCHREIBER"]
+         "OFDM4", "OFDM8", "APSK16", "DSSS", "MSK", "HELLSCHREIBER", "NEURAL", "AUTO"]
 
 DIGITAL_MODES = [
     "FSK1200", "FSK9600", "BPSK", "QPSK", "8PSK", "FSK19200", "OFDM4", "OFDM8", "APSK16", "DSSS", "MSK",

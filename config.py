@@ -41,13 +41,29 @@ class ConfigManager:
                 'max_workers': 4,
                 'buffer_size': 8192,
                 'real_time_processing': True,
-                'cache_enabled': True
+                'cache_enabled': True,
+                'neural_inference': True,  # NOVO: ativar inferência neural
+                'gpu_acceleration': True   # NOVO: ativar aceleração GPU
             },
             'ui': {
                 'auto_save_logs': True,
                 'refresh_interval': 1000,
                 'theme': 'dark'
-            }
+            },
+            # NOVO: Configurações do modem neural
+            'neural_modem': {
+            'enabled': True,
+            'default_symbol_rate': 8000,
+            'use_compression': False,
+            'adaptive_modulation': True
+            },
+
+            'intelligent_communication': {
+                'enabled': True,
+                'auto_mode_selection': True,
+                'channel_analysis': True,
+                'learning_enabled': False
+            },
         }
 
     def get(self, key: str, default=None):

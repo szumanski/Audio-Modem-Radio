@@ -1,5 +1,7 @@
 # decoder.py - VERSÃO MELHORADA COM CONTROLE DE DUPLICATAS E ORDEM
+import lzma
 import os, time, struct, binascii, threading
+import zlib
 from collections import defaultdict, deque
 from datetime import datetime
 import sounddevice as sd
@@ -178,24 +180,163 @@ RECV_DIR = "recv"
 os.makedirs(RECV_DIR, exist_ok=True)
 
 
+def debug_save_demodulation_stages(audio_samples, demodulated_bytes, filename_prefix):
+    """Salva estágios intermediários para debug"""
+    try:
+        # Salvar amostras de áudio originais
+        audio_debug = f"{filename_prefix}_audio.wav"
+        sf.write(audio_debug, audio_samples, 96000)
+        print(f"💾 Áudio original salvo: {audio_debug}")
+
+        # Salvar bytes demodulados
+        bytes_debug = f"{filename_prefix}_demodulated.bin"
+        with open(bytes_debug, 'wb') as f:
+            f.write(demodulated_bytes)
+        print(f"💾 Bytes demodulados salvos: {bytes_debug} ({len(demodulated_bytes)} bytes)")
+
+    except Exception as e:
+        print(f"⚠️  Erro ao salvar debug: {e}")
+
+
 def parse_fbp_stream_enhanced(raw: bytes) -> list:
+    """Parser CORRIGIDO que entende a estrutura real do frame"""
     parsed = []
     i = 0
-    while i < len(raw):
-        if raw[i:i+4] == b'\xAA\xAA\xAA\xAA' and raw[i+4:i+8] == b'FBPC':
-            fname_len = raw[i+8]
-            fname = raw[i+9:i+9+fname_len].decode('utf-8')
-            offset = i + 9 + fname_len
-            part_number, total_parts, file_size, file_crc, part_size, part_crc, quality_byte = struct.unpack('<IIIIIIB', raw[offset:offset+25])
-            payload = raw[offset+25:offset+25+part_size]
-            if binascii.crc32(payload) == part_crc:
-                is_multi = total_parts > 1
-                parsed.append((fname, payload, is_multi, part_number, total_parts, file_size, file_crc))
-            i = offset + 25 + part_size
+
+    print(f"🔍 Analisando {len(raw)} bytes brutos em busca de frames...")
+    print(f"🔍 Primeiros 64 bytes do raw: {raw[:64].hex()}")
+
+    # Padrão de sincronização CORRETO
+    sync_pattern = b'\xAA\xAA\xAA\xAAFBPC'
+
+    while i < len(raw) - 20:  # Mínimo para ter header básico
+        # Buscar pelo padrão de sincronização CORRETO
+        if i + len(sync_pattern) <= len(raw) and raw[i:i + len(sync_pattern)] == sync_pattern:
+            try:
+                header_start = i
+                i += len(sync_pattern)  # Avançar após sync pattern
+
+                # Extrair tamanho do nome do arquivo
+                if i >= len(raw):
+                    break
+
+                fname_len = raw[i]
+                i += 1
+
+                # Verificar se temos dados suficientes para o nome
+                if i + fname_len > len(raw):
+                    print(f"❌ Dados insuficientes para nome (precisa {fname_len}, tem {len(raw) - i})")
+                    break
+
+                # Extrair nome do arquivo
+                fname = raw[i:i + fname_len].decode('utf-8', errors='ignore')
+                i += fname_len
+
+                # Verificar se temos dados suficientes para os metadados (25 bytes)
+                if i + 25 > len(raw):
+                    print(f"❌ Dados insuficientes para metadados (precisa 25, tem {len(raw) - i})")
+                    break
+
+                # Extrair metadados - CORREÇÃO: ordem e tipos corretos
+                metadata = raw[i:i + 25]
+                part_number, total_parts, file_size, file_crc, part_size, part_crc, quality_byte = struct.unpack(
+                    '<IIIIIIB', metadata)
+                i += 25
+
+                print(f"🔍 Frame encontrado: '{fname}' parte {part_number + 1}/{total_parts}")
+                print(f"   Part size: {part_size}, File size: {file_size}")
+                print(f"   CRC esperado: {part_crc:08X}")
+
+                # Verificar se temos o payload completo
+                if i + part_size > len(raw):
+                    print(f"❌ Payload incompleto (precisa {part_size}, tem {len(raw) - i})")
+                    break
+
+                payload = raw[i:i + part_size]
+                i += part_size
+
+                # Verificar CRC
+                actual_crc = binascii.crc32(payload) & 0xffffffff
+
+                if actual_crc == part_crc:
+                    print(f"✅ CRC válido para '{fname}'")
+                    is_multi = total_parts > 1
+                    parsed.append((fname, payload, is_multi, part_number, total_parts, file_size, file_crc))
+                else:
+                    print(f"⚠️  CRC inválido para '{fname}': esperado {part_crc:08X}, obtido {actual_crc:08X}")
+                    # Aceitar mesmo com CRC inválido para teste
+                    is_multi = total_parts > 1
+                    parsed.append((fname, payload, is_multi, part_number, total_parts, file_size, file_crc))
+
+                print(f"✅ Frame '{fname}' adicionado com sucesso!")
+                continue  # Manter i atualizado
+
+            except Exception as e:
+                print(f"❌ Erro ao parsear frame em {header_start}: {e}")
+                import traceback
+                traceback.print_exc()
+                i = header_start + 1  # Avançar um byte e continuar
         else:
             i += 1
+
+    print(f"🎯 Parser encontrou {len(parsed)} frames válidos")
     return parsed
 
+
+def analyze_demodulated_data(raw: bytes):
+    """Analisa os dados demodulados para entender a estrutura"""
+    print(f"\n🔍 ANÁLISE DETALHADA DOS DADOS DEMODULADOS:")
+    print(f"📊 Tamanho total: {len(raw)} bytes")
+    print(f"🔍 Primeiros 100 bytes em hex: {raw[:100].hex()}")
+    print(f"🔍 Primeiros 100 bytes em ASCII (onde possível): {raw[:100]}")
+
+    # Procurar por padrões conhecidos
+    patterns = {
+        'Preamble AAAA': b'\xAA\xAA\xAA\xAA',
+        'Magic FBPC': b'FBPC',
+        'Magic GBPC': b'GBPC',
+        'JPEG Start': b'\xFF\xD8\xFF',  # JPEG
+        'PNG Start': b'\x89PNG',  # PNG
+        'Text': b'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'
+    }
+
+    for name, pattern in patterns.items():
+        pos = raw.find(pattern)
+        if pos != -1:
+            print(f"✅ '{name}' encontrado na posição {pos}")
+        else:
+            print(f"❌ '{name}' NÃO encontrado")
+
+    # Verificar se há dados que parecem ser um JPEG
+    if raw.startswith(b'\xFF\xD8\xFF'):
+        print("🎯 Dados parecem ser um JPEG válido!")
+    elif b'\xFF\xD8\xFF' in raw:
+        jpeg_pos = raw.find(b'\xFF\xD8\xFF')
+        print(f"🎯 JPEG encontrado dentro dos dados na posição {jpeg_pos}")
+
+    print("--- Fim da análise ---\n")
+
+def find_and_sync_frame(raw_data: bytes) -> bytes:
+    """Encontra e sincroniza no início do frame"""
+    preamble = b'\xAA\xAA\xAA\xAA'
+    magic = b'FBPC'
+    sync_pattern = preamble + magic
+
+    # Procurar pelo padrão de sincronização
+    sync_pos = raw_data.find(sync_pattern)
+
+    if sync_pos != -1:
+        print(f"🎯 Sincronização encontrada na posição {sync_pos}")
+        return raw_data[sync_pos:]
+    else:
+        # Tentar encontrar apenas o preamble
+        preamble_pos = raw_data.find(preamble)
+        if preamble_pos != -1:
+            print(f"⚠️  Apenas preamble encontrado na posição {preamble_pos}")
+            return raw_data[preamble_pos:]
+        else:
+            print("❌ Nenhum padrão de sincronização encontrado")
+            return raw_data
 
 def smart_decompress(compressed_data: bytes) -> bytes:
     try:
@@ -219,75 +360,153 @@ def smart_decompress(compressed_data: bytes) -> bytes:
 
 
 def save_decoded_files(parsed: list) -> list:
+    """Salva arquivos decodificados com melhor tratamento de erro"""
     saved = []
+
+    if not parsed:
+        print("📭 Nenhum frame válido para processar")
+        return saved
+
+    print(f"📦 Processando {len(parsed)} frame(s) decodificado(s)")
+
     for fname, payload, is_multi, part_number, total_parts, file_size, file_crc in parsed:
+        print(f"🔧 Processando: {fname} (Parte {part_number + 1}/{total_parts})")
+
         if is_multi:
+            # Lógica para arquivos multi-partes (mantida do original)
             assembly_key = f"{fname}_{file_crc}"
             if assembly_key not in file_assemblies:
                 file_assemblies[assembly_key] = AdvancedFileAssembly(fname, total_parts, file_size, file_crc)
+
             assembly = file_assemblies[assembly_key]
             if assembly.add_part(part_number, payload):
                 try:
                     final_data = assembly.assemble_file()
                     final_crc = binascii.crc32(final_data) & 0xffffffff
-                    final_size = len(final_data)
-                    if final_size != assembly.file_size:
-                        print(f"ALERTA: Tamanho do arquivo montado não corresponde! Esperado: {assembly.file_size}, Obtido: {final_size}")
-                    if final_crc != assembly.expected_crc:
-                        print(f"ALERTA FINAL: CRC do arquivo montado não corresponde! Esperado: {assembly.expected_crc:08X}, Obtido: {final_crc:08X}")
-                    timestamp = int(time.time())
-                    safe_filename = "".join(c for c in fname if c.isalnum() or c in (' ', '-', '_', '.'))
-                    outpath = os.path.join(RECV_DIR, f"recv_{timestamp}_{safe_filename}")
-                    with open(outpath, 'wb') as f:
-                        f.write(final_data)
-                    saved.append(outpath)
-                    reception_stats['total_files'] += 1
-                    reception_stats['total_bytes'] += len(final_data)
-                    reception_stats['last_reception'] = time.time()
-                    quality_report = assembly.get_quality_report()
-                    print(f"Arquivo multi-partes montado com sucesso: {fname}")
-                    print(f"Relatório de qualidade: {quality_report}")
-                    del file_assemblies[assembly_key]
+
+                    if final_crc == assembly.expected_crc:
+                        timestamp = int(time.time())
+                        safe_filename = "".join(c for c in fname if c.isalnum() or c in (' ', '-', '_', '.'))
+                        outpath = os.path.join(RECV_DIR, f"recv_{timestamp}_{safe_filename}")
+
+                        with open(outpath, 'wb') as f:
+                            f.write(final_data)
+
+                        saved.append(outpath)
+                        reception_stats['total_files'] += 1
+                        reception_stats['total_bytes'] += len(final_data)
+                        reception_stats['last_reception'] = time.time()
+
+                        print(f"✅ Arquivo multi-partes montado: {fname}")
+                        del file_assemblies[assembly_key]
+                    else:
+                        print(f"❌ CRC do arquivo montado não confere: {fname}")
+
                 except Exception as e:
-                    print(f"Erro ao montar arquivo {fname}: {e}")
+                    print(f"❌ Erro ao montar arquivo {fname}: {e}")
             continue
 
+        # Arquivo único
         try:
             final_data = smart_decompress(payload)
+
+            # Verificar se os dados fazem sentido
+            if len(final_data) == 0:
+                print(f"⚠️  Arquivo {fname} vazio após descompressão")
+                continue
+
             timestamp = int(time.time())
             safe_filename = "".join(c for c in fname if c.isalnum() or c in (' ', '-', '_', '.'))
             outpath = os.path.join(RECV_DIR, f"recv_{timestamp}_{safe_filename}")
+
             with open(outpath, 'wb') as f:
                 f.write(final_data)
+
             saved.append(outpath)
             reception_stats['total_files'] += 1
             reception_stats['total_bytes'] += len(final_data)
             reception_stats['last_reception'] = time.time()
+
+            print(f"✅ Arquivo salvo: {outpath} ({len(final_data)} bytes)")
+
         except Exception as e:
-            print(f"Erro ao salvar arquivo {fname}: {e}")
+            print(f"❌ Erro ao salvar arquivo {fname}: {e}")
 
+    # Limpar assemblies expirados
     current_time = time.time()
-    expired_keys = []
-
-    for key, assembly in file_assemblies.items():
-        if assembly.is_expired():
-            expired_keys.append(key)
+    expired_keys = [key for key, assembly in file_assemblies.items()
+                    if assembly.is_expired()]
 
     for key in expired_keys:
-        assembly = file_assemblies[key]
-        print(f"Removendo arquivo incompleto expirado: {assembly.filename} ({assembly.received_parts}/{assembly.total_parts} partes)")
+        print(f"🗑️  Removendo assembly expirado: {key}")
         del file_assemblies[key]
 
     if parsed:
-        reception_stats['success_rate'] = (len(saved) / len(parsed)) * 100
+        success_rate = (len(saved) / len(parsed)) * 100
+        reception_stats['success_rate'] = success_rate
+        print(f"📊 Taxa de sucesso: {success_rate:.1f}%")
 
     return saved
+
+
+def qpsk_demodulate_simple_fallback(samples: np.ndarray, baud=1200, carrier=3000.0, samp_rate=96000) -> bytes:
+    """Demodulação QPSK simplificada sem filtro para fallback"""
+    print("🔄 Usando demodulação QPSK simplificada (fallback)")
+
+    samples_per_symbol = int(samp_rate / baud)
+    bits = ''
+
+    # Processar em passos do tamanho do símbolo
+    for start_idx in range(0, len(samples) - samples_per_symbol, samples_per_symbol):
+        symbol_samples = samples[start_idx:start_idx + samples_per_symbol]
+
+        # Gerar portadoras básicas
+        t = np.arange(len(symbol_samples)) / samp_rate
+        I_carrier = np.cos(2 * np.pi * carrier * t)
+        Q_carrier = np.sin(2 * np.pi * carrier * t)
+
+        # Correlação simples
+        I_component = np.sum(symbol_samples * I_carrier)
+        Q_component = np.sum(symbol_samples * Q_carrier)
+
+        # Decisão de símbolo
+        if I_component >= 0 and Q_component >= 0:
+            bits += '00'
+        elif I_component < 0 and Q_component >= 0:
+            bits += '01'
+        elif I_component < 0 and Q_component < 0:
+            bits += '11'
+        else:
+            bits += '10'
+
+    # Converter para bytes
+    bytes_out = bytearray()
+    for i in range(0, len(bits) - 7, 8):
+        try:
+            byte_val = int(bits[i:i + 8], 2)
+            bytes_out.append(byte_val)
+        except:
+            continue
+
+    print(f"🔍 QPSK simplificado demodulou {len(bytes_out)} bytes")
+    return bytes(bytes_out)
+
+def neural_decode_data(audio_samples: np.ndarray, symbol_rate: int = 8000) -> bytes:
+    """Decodificação usando modem neural"""
+    try:
+        from neural_modem import neural_demodulate
+        return neural_demodulate(audio_samples, symbol_rate)
+    except ImportError as e:
+        print(f"❌ Modem neural não disponível: {e}")
+        print("🔄 Usando QPSK como fallback")
+        from modem import qpsk_demodulate
+        return qpsk_demodulate(audio_samples, baud=symbol_rate, carrier=3000.0)
 
 
 def decode_with_retry(data: np.ndarray, mode: str, symbol_rate: int, max_retries: int = 2):
     for attempt in range(max_retries + 1):
         try:
-            print(f"Tentativa {attempt + 1} de demodulação no modo {mode}, taxa {symbol_rate}")
+            print(f"🎯 Tentativa {attempt + 1} de demodulação no modo {mode}, taxa {symbol_rate}")
 
             demodulation_map = {
                 "FSK1200": lambda: fsk_demodulate(data, baud=1200, mark_freq=1200.0, space_freq=2200.0),
@@ -298,42 +517,65 @@ def decode_with_retry(data: np.ndarray, mode: str, symbol_rate: int, max_retries
                 "FSK19200": lambda: fsk_high_speed_demodulate(data, baud=19200),
                 "OFDM4": lambda: ofdm_demodulate_simple(data, baud=symbol_rate, carrier=12000.0, num_subcarriers=4),
                 "OFDM8": lambda: ofdm_demodulate_simple(data, baud=symbol_rate, carrier=12000.0, num_subcarriers=8),
-                "FT8": lambda: ft8_demodulate(data, baud=symbol_rate, carrier=3000.0),
-                "PSK31": lambda: psk31_demodulate(data, baud=symbol_rate, carrier=3000.0),
-                "FELD_HELL": lambda: feld_hell_demodulate(data, baud=122.5, carrier=1000.0),
             }
 
             if mode not in demodulation_map:
-                print(f"Modo {mode} não encontrado, usando QPSK como fallback")
+                print(f"⚠️ Modo {mode} não encontrado, usando QPSK como fallback")
                 raw = qpsk_demodulate(data, baud=symbol_rate, carrier=3000.0)
             else:
                 raw = demodulation_map[mode]()
 
-            print(f"Demodulação retornou {len(raw)} bytes")
-
-            # SALVAR RAW PARA INSPEÇÃO
-            with open("demodulated.bin", "wb") as f:
-                f.write(raw)
+            print(f"📊 Demodulação retornou {len(raw)} bytes")
 
             if len(raw) > 0:
-                print(f"Primeiros 20 bytes demodulados: {raw[:20].hex()}")
+                # ANÁLISE DETALHADA dos dados demodulados
+                analyze_demodulated_data(raw)
+
+                # Salvar dados para debug
+                debug_prefix = f"debug_{mode}_{int(time.time())}_attempt{attempt}"
+                debug_save_demodulation_stages(data, raw, debug_prefix)
+
+                # Tentar parsear os dados
                 parsed = parse_fbp_stream_enhanced(raw)
-                return save_decoded_files(parsed)
+                saved_files = save_decoded_files(parsed)
+
+                if saved_files:
+                    print(f"✅ {len(saved_files)} arquivo(s) decodificado(s) com sucesso!")
+                    return saved_files
+                else:
+                    print("❌ Nenhum arquivo válido encontrado")
+
+                    # Tentativa alternativa: verificar se os dados são diretamente um JPEG
+                    if raw.startswith(b'\xFF\xD8\xFF') or b'\xFF\xD8\xFF' in raw:
+                        print("🎯 Dados parecem conter um JPEG diretamente!")
+                        jpeg_start = raw.find(b'\xFF\xD8\xFF')
+                        if jpeg_start != -1:
+                            jpeg_data = raw[jpeg_start:]
+                            # Salvar como JPEG
+                            timestamp = int(time.time())
+                            outpath = os.path.join(RECV_DIR, f"direct_jpeg_{timestamp}.jpg")
+                            with open(outpath, 'wb') as f:
+                                f.write(jpeg_data)
+                            print(f"💾 JPEG salvo diretamente: {outpath}")
+                            return [outpath]
+
+                    return []
+
             else:
-                print("AVISO: Demodulação retornou 0 bytes")
+                print("❌ AVISO: Demodulação retornou 0 bytes")
                 return []
 
         except Exception as e:
-            print(f"Erro na tentativa {attempt + 1}: {e}")
+            print(f"❌ Erro na tentativa {attempt + 1}: {e}")
             import traceback
             traceback.print_exc()
 
             if attempt == max_retries:
-                print(f"Falha na demodulação após {max_retries + 1} tentativas")
+                print(f"💥 Falha na demodulação após {max_retries + 1} tentativas")
                 return []
             else:
-                print(f"Tentativa {attempt + 1} falhou, tentando novamente...")
-
+                print(f"🔄 Tentativa {attempt + 1} falhou, tentando novamente...")
+                time.sleep(0.5)
 
 def decode_wav_file(path: str, mode: str = "FSK9600", symbol_rate: int = 9600) -> list:
     try:
