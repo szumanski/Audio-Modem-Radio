@@ -1,7 +1,11 @@
 # hellschreiber.py - Sistema completo de transmissão de texto estilo fac-símile
 import numpy as np
 import math
-from modem import SAMPLE_RATE
+
+# 🔥 ADD THIS LINE - Define SAMPLE_RATE directly to avoid circular imports
+SAMPLE_RATE = 96000
+
+# -------------------------------------------------------------------------------------
 
 # Mapeamento completo de caracteres ASCII para padrões 7x7
 CHAR_MAP = {
@@ -101,7 +105,6 @@ CHAR_MAP = {
     '}': [0x08, 0x04, 0x04, 0x02, 0x04, 0x04, 0x08],
     '~': [0x00, 0x00, 0x00, 0x0D, 0x12, 0x00, 0x00],
 }
-
 
 def hellschreiber_modulate(text: str, baud=122.5, carrier=1000.0, samp_rate=SAMPLE_RATE) -> np.ndarray:
     """Modulação Hellschreiber para transmissão de texto"""

@@ -55,5 +55,30 @@ class PTTManager:
                 print(f"Erro ao desativar PTT: {e}")
 
 
+class PTTContext:
+    """Context manager para controle seguro de PTT"""
+
+    def __init__(self, port="Nenhuma", method="RTS"):
+        self.port = port
+        self.method = method
+        self.ptt_controller = ptt_controller
+
+    def __enter__(self):
+        """Ativa PTT ao entrar no contexto"""
+        if self.port and self.port != "Nenhuma":
+            self.ptt_controller.connect(self.port, self.method)
+            self.ptt_controller.ptt_on()
+            print(f"🔴 PTT ON via context manager ({self.port})")
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Desativa PTT ao sair do contexto, mesmo com erros"""
+        if self.port and self.port != "Nenhuma":
+            self.ptt_controller.ptt_off()
+            print(f"⚪ PTT OFF via context manager")
+        # Retorna False para propagar exceções se ocorrerem
+        return False
+
+
 # Instância global
 ptt_controller = PTTManager()

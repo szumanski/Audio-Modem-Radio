@@ -1,19 +1,22 @@
-# decoder.py - VERSÃO MELHORADA COM CONTROLE DE DUPLICATAS E ORDEM
+import lzma
 import os, time, struct, binascii, threading
+import zlib
 from collections import defaultdict, deque
 from datetime import datetime
 import sounddevice as sd
 import numpy as np
 import soundfile as sf
-from sklearn.ensemble import IsolationForest
-import joblib
-
+import scipy.signal as signal
+from typing import Dict
+from collections import defaultdict
 from modem import (fsk_demodulate, bpsk_demodulate, qpsk_demodulate,
                    psk8_demodulate, fsk_high_speed_demodulate, ofdm_demodulate_simple,
                    SAMPLE_RATE, ft8_demodulate, psk31_demodulate, feld_hell_demodulate)
-from utils.compression import decompress_data, super_decompress, delta_decompress
+from utils.compression import decompress_data, super_decompress, delta_decompress, intelligent_decompress
 
-
+RECV_DIR = "recv"
+os.makedirs(RECV_DIR, exist_ok=True)
+active_file_assemblies: Dict[str, 'FileAssembly'] = {}
 class FileAssembly:
     def __init__(self, filename: str, total_parts: int, file_size: int, file_crc: int):
         self.filename = filename
@@ -113,48 +116,6 @@ class FileAssembly:
         }
 
 
-class MLSignalProcessor:
-    def __init__(self):
-        self.anomaly_detector = None
-        self.signal_features = []
-        self._initialize_detector()
-
-    def _initialize_detector(self):
-        """Inicializa detector de anomalias"""
-        try:
-            self.anomaly_detector = IsolationForest(contamination=0.1, random_state=42)
-        except:
-            self.anomaly_detector = None
-
-    def extract_features(self, signal: np.ndarray) -> list:
-        """Extrai features do sinal para análise ML"""
-        if len(signal) < 100:
-            return [0] * 10
-
-        features = [
-            np.mean(signal),  # Média
-            np.std(signal),  # Desvio padrão
-            np.max(np.abs(signal)),  # Pico máximo
-            np.median(signal),  # Mediana
-            np.percentile(signal, 75),  # Quartil superior
-            np.percentile(signal, 25),  # Quartil inferior
-            len(signal),  # Comprimento
-            np.sum(signal > 0.1),  # Amostras acima do threshold
-            np.var(signal),  # Variância
-            np.mean(np.diff(signal) ** 2)  # Energia da derivada
-        ]
-        return features
-
-    def detect_anomalies(self, signal: np.ndarray) -> float:
-        """Detecta anomalias no sinal usando ML"""
-        if self.anomaly_detector is None or len(signal) < 100:
-            return 0.0
-
-        features = self.extract_features(signal)
-        anomaly_score = self.anomaly_detector.decision_function([features])[0]
-        return max(0.0, min(1.0, 1.0 - anomaly_score))
-
-
 class AdvancedFileAssembly(FileAssembly):
     def __init__(self, filename: str, total_parts: int, file_size: int, file_crc: int):
         super().__init__(filename, total_parts, file_size, file_crc)
@@ -179,43 +140,108 @@ os.makedirs(RECV_DIR, exist_ok=True)
 
 
 def parse_fbp_stream_enhanced(raw: bytes) -> list:
-    parsed = []
-    i = 0
-    while i < len(raw):
-        if raw[i:i+4] == b'\xAA\xAA\xAA\xAA' and raw[i+4:i+8] == b'FBPC':
-            fname_len = raw[i+8]
-            fname = raw[i+9:i+9+fname_len].decode('utf-8')
-            offset = i + 9 + fname_len
-            part_number, total_parts, file_size, file_crc, part_size, part_crc, quality_byte = struct.unpack('<IIIIIIB', raw[offset:offset+25])
-            payload = raw[offset+25:offset+25+part_size]
-            if binascii.crc32(payload) == part_crc:
-                is_multi = total_parts > 1
-                parsed.append((fname, payload, is_multi, part_number, total_parts, file_size, file_crc))
-            i = offset + 25 + part_size
-        else:
-            i += 1
-    return parsed
+    """Parser robusto que procura Magic Bytes em qualquer lugar"""
+    parsed_files = []
 
+    # Magic bytes FBPC
+    magic = b'FBPC'
+
+    # Busca ingênua por todos os índices que contêm o Magic
+    # Nota: O Modem agora tenta alinhar os bits para que os bytes saiam alinhados
+    # Se o modem falhar no bit-alignment, este find falhará.
+
+    start_indices = []
+    offset = 0
+    while True:
+        idx = raw.find(magic, offset)
+        if idx == -1: break
+        start_indices.append(idx)
+        offset = idx + 1
+
+    print(f"Encontrados {len(start_indices)} candidatos a cabeçalho.")
+
+    for start in start_indices:
+        try:
+            # Header minimo: Magic(4) + Len(1) + Name(1) + Meta(20)
+            if start + 30 > len(raw): continue
+
+            # Ler tamanho do nome
+            name_len = raw[start + 4]
+            if name_len == 0: continue
+
+            # Ler nome
+            name_start = start + 5
+            fname = raw[name_start: name_start + name_len].decode('utf-8', 'ignore')
+
+            # Metadados
+            meta_start = name_start + name_len
+            # Part(4) + Total(4) + FSize(4) + FCrc(4) + DataLen(4) + PartCrc(4)
+            if meta_start + 24 > len(raw): continue
+
+            (part_num, total_parts, fsize, fcrc, dlen, pcrc) = struct.unpack('<IIIIII', raw[meta_start:meta_start + 24])
+
+            # Validar sanidade
+            if dlen > 50_000_000 or dlen == 0: continue  # Tamanho absurdo
+
+            payload_start = meta_start + 24
+            if payload_start + dlen > len(raw):
+                print(f"Dados incompletos para {fname}")
+                continue
+
+            payload = raw[payload_start: payload_start + dlen]
+
+            # Validar CRC
+            calc_crc = binascii.crc32(payload) & 0xffffffff
+            if calc_crc == pcrc:
+                print(f"✅ CRC VÁLIDO: {fname} (Parte {part_num + 1}/{total_parts})")
+                parsed_files.append({
+                    'name': fname,
+                    'data': payload,
+                    'final_crc': fcrc
+                })
+            else:
+                print(f"❌ Erro de CRC para {fname}")
+
+        except Exception as e:
+            print(f"Erro no parse candidato {start}: {e}")
+
+    return parsed_files
 
 def smart_decompress(compressed_data: bytes) -> bytes:
+    """Descompressão inteligente com fallbacks"""
     try:
+        print(f"🔍 Tentando descomprimir {len(compressed_data)} bytes...")
+
         if compressed_data.startswith(b'LZMA'):
+            print("📦 Usando descompressão LZMA")
+            import lzma
             return lzma.decompress(compressed_data[4:])
         elif compressed_data.startswith(b'DLZM'):
+            print("📦 Usando descompressão Delta+LZMA")
+            import lzma
             lzma_decompressed = lzma.decompress(compressed_data[4:])
             return delta_decompress(lzma_decompressed)
         elif compressed_data.startswith(b'ZLIB'):
+            print("📦 Usando descompressão ZLIB")
+            import zlib
             return zlib.decompress(compressed_data[4:])
         elif compressed_data.startswith(b'RAW'):
+            print("📦 Dados RAW, sem compressão")
             return compressed_data[4:]
         else:
+            # Tentar descompressão automática
             try:
+                print("🔍 Tentando descompressão ZLIB automática...")
+                import zlib
                 return zlib.decompress(compressed_data)
             except:
+                print("📦 Dados não comprimidos, retornando raw")
                 return compressed_data
+
     except Exception as e:
         print(f"⚠️ Erro na descompressão inteligente: {e}")
         return compressed_data
+
 
 
 def save_decoded_files(parsed: list) -> list:
@@ -284,10 +310,21 @@ def save_decoded_files(parsed: list) -> list:
     return saved
 
 
-def decode_with_retry(data: np.ndarray, mode: str, symbol_rate: int, max_retries: int = 2):
-    for attempt in range(max_retries + 1):
+def decode_with_retry(data: np.ndarray, mode: str, symbol_rate: int, max_retries: int = 3):
+    """Decodificação com múltiplas tentativas e parâmetros ajustáveis"""
+
+    best_result = []
+    best_quality = 0
+
+    for attempt in range(max_retries):
         try:
-            print(f"Tentativa {attempt + 1} de demodulação no modo {mode}, taxa {symbol_rate}")
+            print(f"🎯 Tentativa {attempt + 1} de demodulação no modo {mode}, taxa {symbol_rate}")
+
+            # Ajustar parâmetros baseado na tentativa
+            if attempt == 1:
+                symbol_rate = int(symbol_rate * 0.95)  # Reduzir slightly na segunda tentativa
+            elif attempt == 2:
+                symbol_rate = int(symbol_rate * 1.05)  # Aumentar slightly na terceira tentativa
 
             demodulation_map = {
                 "FSK1200": lambda: fsk_demodulate(data, baud=1200, mark_freq=1200.0, space_freq=2200.0),
@@ -311,71 +348,155 @@ def decode_with_retry(data: np.ndarray, mode: str, symbol_rate: int, max_retries
 
             print(f"Demodulação retornou {len(raw)} bytes")
 
-            # SALVAR RAW PARA INSPEÇÃO
-            with open("demodulated.bin", "wb") as f:
-                f.write(raw)
+            if len(raw) > 100:  # Reduzir limite mínimo
+                # SALVAR RAW PARA INSPEÇÃO (apenas se for significativo)
+                with open(f"demodulated_attempt_{attempt}.bin", "wb") as f:
+                    f.write(raw)
 
-            if len(raw) > 0:
-                print(f"Primeiros 20 bytes demodulados: {raw[:20].hex()}")
+                print(f"Primeiros 50 bytes demodulados: {raw[:50].hex()}")
                 parsed = parse_fbp_stream_enhanced(raw)
-                return save_decoded_files(parsed)
+
+                if parsed:
+                    saved_files = save_decoded_files(parsed)
+                    if saved_files:
+                        print(f"✅ Tentativa {attempt + 1} bem-sucedida: {len(saved_files)} arquivos salvos")
+                        return saved_files
+                    else:
+                        print(f"⚠️ Tentativa {attempt + 1}: frames encontrados mas não salvos")
+                else:
+                    print(f"⚠️ Tentativa {attempt + 1}: nenhum frame encontrado")
             else:
-                print("AVISO: Demodulação retornou 0 bytes")
-                return []
+                print(f"⚠️ Tentativa {attempt + 1}: demodulação retornou apenas {len(raw)} bytes")
 
         except Exception as e:
-            print(f"Erro na tentativa {attempt + 1}: {e}")
+            print(f"❌ Erro na tentativa {attempt + 1}: {e}")
             import traceback
             traceback.print_exc()
 
-            if attempt == max_retries:
-                print(f"Falha na demodulação após {max_retries + 1} tentativas")
-                return []
-            else:
-                print(f"Tentativa {attempt + 1} falhou, tentando novamente...")
+    print(f"❌ Falha na demodulação após {max_retries} tentativas")
+    return []
 
 
-def decode_wav_file(path: str, mode: str = "FSK9600", symbol_rate: int = 9600) -> list:
+def decode_wav_file(path: str, mode: str, symbol_rate: int) -> list:
+    data, sr = sf.read(path)
+    if len(data.shape) > 1: data = data[:, 0]  # Mono
+
+    # Resample se necessario
+    if sr != SAMPLE_RATE:
+        number_of_samples = int(round(len(data) * float(SAMPLE_RATE) / sr))
+        data = signal.resample(data, number_of_samples)
+
+    return decode_from_buffer(data, mode, symbol_rate)
+
+
+def calculate_global_average_quality() -> float:
+    """Calcula a qualidade média do sinal recebido em todos os arquivos ativos."""
+    global active_file_assemblies
+    total_quality = 0.0
+    total_parts = 0
+
+    # Safeguard: If not initialized, return 0.0 and log a warning
     try:
-        print(f"Decodificando arquivo: {path}")
-        data, sr = sf.read(path, always_2d=False)
+        if not active_file_assemblies:
+            return 0.0
+    except NameError:
+        print("Warning: active_file_assemblies not defined. Initializing now.")
+        active_file_assemblies = {}  # Sem 'global' aqui, pois já declarado no topo
+        return 0.0
 
-        if data.ndim > 1:
-            data = data.mean(axis=1)
+    for assembly in active_file_assemblies.values():
+        if assembly.parts_quality and assembly.received_parts > 0:
+            # Pondera pela qualidade das partes realmente recebidas
+            # Filtra partes com qualidade 0.0 que podem não ter sido recebidas ou iniciadas
+            qualities = [q for q in assembly.parts_quality if q > 0]
+            total_quality += sum(qualities)
+            total_parts += len(qualities)
 
-        if sr != SAMPLE_RATE:
-            from scipy import signal
-            num_samples = int(len(data) * SAMPLE_RATE / sr)
-            data = signal.resample(data, num_samples)
+    return (total_quality / total_parts) if total_parts > 0 else 0.0
 
-        return decode_with_retry(data, mode, symbol_rate)
+def decode_from_buffer(data: np.ndarray, mode: str, symbol_rate: int) -> list:
+    print(f"Demodulando {len(data)} amostras em modo {mode}...")
+
+    try:
+        raw_bytes = b''
+        if mode == "BPSK":
+            raw_bytes = bpsk_demodulate(data, baud=symbol_rate)
+        elif mode == "QPSK" or mode == "8PSK":
+            raw_bytes = qpsk_demodulate(data, baud=symbol_rate)
+        elif mode.startswith("FSK"):
+            baud = 1200
+            if "9600" in mode:
+                baud = 9600
+            elif "19200" in mode:
+                baud = 19200
+            raw_bytes = fsk_demodulate(data, baud=baud)
+        else:
+            raw_bytes = qpsk_demodulate(data, baud=symbol_rate)
+
+        print(f"Bytes brutos demodulados: {len(raw_bytes)}")
+        # Dump para debug se precisar
+        # with open("last_demod.bin", "wb") as f: f.write(raw_bytes)
+
+        frames = parse_fbp_stream_enhanced(raw_bytes)
+        saved = []
+
+        for frame in frames:
+            try:
+                # Descompressão
+                final_data = intelligent_decompress(frame['data'])
+
+                ts = int(time.time())
+                clean_name = os.path.basename(frame['name'])
+                path = os.path.join(RECV_DIR, f"{ts}_{clean_name}")
+
+                with open(path, 'wb') as f:
+                    f.write(final_data)
+                saved.append(path)
+            except Exception as e:
+                print(f"Erro salvando arquivo: {e}")
+
+        return saved
 
     except Exception as e:
-        print(f"Erro na decodificação do arquivo WAV: {e}")
+        print(f"Erro crítico na demodulação: {e}")
+        import traceback
+        traceback.print_exc()
         return []
 
 
-def decode_from_buffer(data: np.ndarray, mode: str, symbol_rate: int) -> list:
-    return decode_with_retry(data, mode, symbol_rate)
+def get_assembly_status(): return []
 
 
-def get_assembly_status():
-    status = []
-    for assembly in file_assemblies.values():
-        status.append({
-            'filename': assembly.filename,
-            'received': assembly.received_parts,
-            'total': assembly.total_parts,
-            'progress': assembly.get_progress(),
-            'last_update': assembly.last_update,
-            'missing_parts': assembly.get_missing_parts()
-        })
-    return status
+def find_frame_start(data: bytes, start_pos: int = 0) -> int:
+    """Encontra o início do próximo frame de forma robusta"""
+    preamble = b'\xAA\xAA\xAA\xAA'
+    magic = b'FBPC'
+
+    for i in range(start_pos, len(data) - 8):
+        if data[i:i + 4] == preamble and data[i + 4:i + 8] == magic:
+            return i
+    return -1
 
 
 def get_reception_stats():
-    return reception_stats.copy()
+    global reception_stats
+    stats = reception_stats.copy()
 
+    # 💥 CORREÇÃO PRINCIPAL: Garante que 'average_quality' esteja sempre presente
+    stats['average_quality'] = calculate_global_average_quality()
+
+    return stats
+
+def debug_demodulation(samples: np.ndarray, mode: str, symbol_rate: int):
+    """Função para debug da demodulação"""
+    print(f"🔍 DEBUG Demodulação:")
+    print(f"   - Modo: {mode}")
+    print(f"   - Taxa: {symbol_rate}")
+    print(f"   - Amostras: {len(samples)}")
+    print(f"   - Primeiras 20 amostras: {samples[:20]}")
+    print(f"   - Média: {np.mean(samples):.6f}")
+    print(f"   - Std: {np.std(samples):.6f}")
+    print(f"   - Min/Max: {np.min(samples):.6f}/{np.max(samples):.6f}")
 
 def clear_reception_stats():
     global reception_stats

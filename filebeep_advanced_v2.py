@@ -4,6 +4,7 @@ import sys
 import tempfile
 import time
 import threading
+import logging  # 🔥 ADD MISSING IMPORT
 from datetime import datetime
 from ptt import ptt_controller
 import pygame
@@ -24,43 +25,51 @@ from decoder import decode_wav_file, decode_from_buffer, get_assembly_status, ge
 
 try:
     import psutil
-
     PSUTIL_AVAILABLE = True
 except ImportError:
     PSUTIL_AVAILABLE = False
 
 try:
     import pyqtgraph as pg
-
     PYQTGRAPH_AVAILABLE = True
 except ImportError:
     PYQTGRAPH_AVAILABLE = False
 
-
 # ===============================================
 # CONFIGURAÇÃO PARA EXECUTÁVEL
 # ===============================================
-def setup_executable_paths():
-    if getattr(sys, 'frozen', False):
-        # Se estiver rodando como .exe (PyInstaller)
-        base_path = sys._MEIPASS
-    else:
-        # Se estiver rodando no PyCharm/Terminal
-        base_path = os.path.dirname(os.path.abspath(__file__))
+def setup_logging():
+    """Configura sistema de logging estruturado"""
+    logger = logging.getLogger('filebeep')
+    logger.setLevel(logging.INFO)
 
-    sys.path.insert(0, base_path)
+    # Evitar duplicação de handlers
+    if logger.handlers:
+        logger.handlers.clear()
 
-    # IMPORTANTE: Comente ou remova a linha abaixo.
-    # O PyInstaller configura o Qt automaticamente. Forçar isso causa erro no .exe.
-    # os.environ['QT_QPA_PLATFORM_PLUGIN_PATH'] = os.path.join(base_path, 'PyQt5', 'Qt5', 'plugins')
+    # Formatação
+    formatter = logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        datefmt='%H:%M:%S'
+    )
 
-    return base_path
+    # Handler para arquivo
+    file_handler = logging.FileHandler('filebeep_system.log', encoding='utf-8')
+    file_handler.setFormatter(formatter)
+
+    # Handler para console
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setFormatter(formatter)
+
+    logger.addHandler(file_handler)
+    logger.addHandler(console_handler)
+
+    return logger
 
 
-BASE_PATH = setup_executable_paths()
+# 🔥 INICIALIZAR logger global
+logger = setup_logging()
 
-CACHE_DIR = "cache"
-os.makedirs(CACHE_DIR, exist_ok=True)
 
 # ===============================================
 # CONSTANTES E CONFIGURAÇÕES DE UI
@@ -94,6 +103,14 @@ COLORS = {
 # ===============================================
 # COMPONENTES DE UI PERSONALIZADOS
 # ===============================================
+class AudioLoadError(Exception):
+    pass
+
+
+class AudioPlayError(Exception):
+    pass
+
+
 class HeaderWidget(QWidget):
     def __init__(self, title="FileBeep Advanced v2", subtitle="Sistema Avançado de Transmissão de Dados por Áudio"):
         super().__init__()
@@ -487,7 +504,7 @@ class ModernMainWindow(QMainWindow):
             QPushButton:pressed {{
                 background: {COLORS['accent']};
             }}
-            
+
             QPushButton:disabled {{
                 background: {COLORS['dark']};
                 color: #888888;
@@ -503,7 +520,7 @@ class ModernMainWindow(QMainWindow):
                 padding: 5px;
                 selection-background-color: {COLORS['primary']};
             }}
-            
+
             QComboBox QAbstractItemView {{
                 background-color: {COLORS['darker']};
                 color: {COLORS['light']};
@@ -514,7 +531,7 @@ class ModernMainWindow(QMainWindow):
                 color: {COLORS['light']};
                 spacing: 5px;
             }}
-            
+
             QCheckBox::indicator {{
                 width: 15px;
                 height: 15px;
@@ -522,7 +539,7 @@ class ModernMainWindow(QMainWindow):
                 border-radius: 3px;
                 background: {COLORS['darker']};
             }}
-            
+
             QCheckBox::indicator:checked {{
                 background: {COLORS['success']};
                 border: 1px solid {COLORS['success']};
@@ -548,7 +565,7 @@ class ModernMainWindow(QMainWindow):
                 border: 1px solid {COLORS['primary']};
                 border-radius: 3px;
             }}
-            
+
             /* Barras de Rolagem (Opcional, para ficar bonito) */
             QScrollBar:vertical {{
                 border: none;
@@ -685,7 +702,6 @@ class ModernMainWindow(QMainWindow):
 
         left_layout.addLayout(action_layout)
         left_layout.addStretch()
-
 
         # Painel direito - Visualização
         right_panel = QWidget()
@@ -1223,25 +1239,45 @@ class ModernMainWindow(QMainWindow):
             QMessageBox.warning(self, "Atenção", "Por favor, selecione um arquivo da playlist primeiro.")
 
     def play_audio_file(self, file_path):
-        """Reproduz um arquivo de áudio COM PTT"""
-        # Configurar PTT antes de tocar
+        """Reproduz um arquivo de áudio COM PTT de forma segura"""
         port = self.port_combo.currentText()
         method = self.ptt_method_combo.currentText()
 
-        if port != "Nenhuma":
-            ptt_controller.connect(port, method)
-            ptt_controller.ptt_on()  # <-- LIGA O RÁDIO
-            self.log_message(f"📻 Transmitindo via {port} ({method})...")
+        try:
+            # Usar context manager para garantir que PTT desligue em qualquer caso
+            with PTTContext(port, method) as ptt:
+                if port != "Nenhuma":
+                    self.log_message(f"📻 Transmitindo via {port} ({method})...")
 
-        if self.audio_player.load_file(file_path):
-            self.audio_player.play()
-            self.playing_files.add(file_path)
-            self.played_files.discard(file_path)
-            self.log_message(f"🎵 Reproduzindo: {os.path.basename(file_path)}")
-        else:
-            ptt_controller.ptt_off()  # Desliga se falhar
-            QMessageBox.warning(self, "Erro", f"Não foi possível reproduzir: {os.path.basename(file_path)}")
+                # Tentar carregar o arquivo
+                if not self.audio_player.load_file(file_path):
+                    raise AudioLoadError(f"Falha ao carregar arquivo: {os.path.basename(file_path)}")
 
+                # Iniciar reprodução
+                if not self.audio_player.play():
+                    raise AudioPlayError(f"Falha ao reproduzir: {os.path.basename(file_path)}")
+
+                # Marcar como reproduzindo
+                self.playing_files.add(file_path)
+                self.played_files.discard(file_path)
+                self.log_message(f"🎵 Reproduzindo: {os.path.basename(file_path)}")
+
+        except AudioLoadError as e:
+            self.log_message(f"❌ {e}", 'error')
+            QMessageBox.warning(self, "Erro de Áudio", str(e))
+            return False
+
+        except AudioPlayError as e:
+            self.log_message(f"❌ {e}", 'error')
+            QMessageBox.warning(self, "Erro de Reprodução", str(e))
+            return False
+
+        except Exception as e:
+            self.log_message(f"❌ Erro inesperado: {e}", 'error')
+            QMessageBox.critical(self, "Erro", f"Erro inesperado: {e}")
+            return False
+
+        return True
 
     def on_pause(self):
         """Pausa a reprodução"""
@@ -1251,7 +1287,7 @@ class ModernMainWindow(QMainWindow):
     def on_stop(self):
         """Para a reprodução"""
         self.audio_player.stop()
-        ptt_controller.ptt_off() # <-- GARANTIA DE SEGURANÇA
+        ptt_controller.ptt_off()  # <-- GARANTIA DE SEGURANÇA
         if self.audio_player.current_file:
             self.playing_files.discard(self.audio_player.current_file)
         self.log_message("⏹️ Reprodução parada")
@@ -1271,11 +1307,21 @@ class ModernMainWindow(QMainWindow):
     # ===============================================
     # MÉTODOS DE LOG E UTILITÁRIOS
     # ===============================================
-    def log_message(self, message):
+    def log_message(self, message: str, level: str = 'info'):
         """Adiciona mensagem ao log"""
         timestamp = datetime.now().strftime("%H:%M:%S")
-        self.log_text.append(f"[{timestamp}] {message}")
-        self.log_manager.write_log("INFO", message)
+        log_entry = f"[{timestamp}] {message}"
+
+        # Log estruturado
+        getattr(logger, level)(message)
+
+        # Atualizar UI
+        self.log_text.append(log_entry)
+
+        # Scroll para baixo
+        self.log_text.verticalScrollBar().setValue(
+            self.log_text.verticalScrollBar().maximum()
+        )
 
     def clear_log(self):
         """Limpa o log"""
@@ -1413,6 +1459,31 @@ class LogManager:
                 os.rename(self.log_file, backup_name)
         except Exception as e:
             print(f"Erro na rotação de log: {e}")
+
+
+class PTTContext:
+    """Context manager para controle seguro de PTT"""
+
+    def __init__(self, port="Nenhuma", method="RTS"):
+        self.port = port
+        self.method = method
+        self.ptt_controller = ptt_controller
+
+    def __enter__(self):
+        """Ativa PTT ao entrar no contexto"""
+        if self.port and self.port != "Nenhuma":
+            self.ptt_controller.connect(self.port, self.method)
+            self.ptt_controller.ptt_on()
+            print(f"🔴 PTT ON via context manager ({self.port})")
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Desativa PTT ao sair do contexto, mesmo com erros"""
+        if self.port and self.port != "Nenhuma":
+            self.ptt_controller.ptt_off()
+            print(f"⚪ PTT OFF via context manager")
+        # Retorna False para propagar exceções se ocorrerem
+        return False
 
 
 # ===============================================
